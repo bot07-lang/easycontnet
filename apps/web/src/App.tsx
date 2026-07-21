@@ -7,6 +7,7 @@ import { ItemEditor } from './components/ItemEditor';
 import { AllProjects } from './components/AllProjects';
 import { ContentItemsTable } from './components/ContentItemsTable';
 import { CreateItemDialog } from './components/CreateItemDialog';
+import { WorkflowSettings } from './components/WorkflowSettings';
 import { Sidebar, IMPLEMENTED, type NavKey } from './components/Sidebar';
 
 /**
@@ -110,6 +111,14 @@ function ProjectView({
     queryFn: () => api.listItems(projectId),
     enabled: nav === 'content',
   });
+
+  if (nav === 'workflow') {
+    return (
+      <div className="h-full overflow-y-auto p-6">
+        <WorkflowSettings projectId={projectId} />
+      </div>
+    );
+  }
 
   if (nav !== 'content' || !IMPLEMENTED[nav]) {
     return (

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ItemSummary } from '../lib/api';
 import { CreateItemDialog } from './CreateItemDialog';
 
@@ -116,7 +116,7 @@ export function ContentItemsTable({
               <tr><td colSpan={activeCols.length + 3} className="px-4 py-8 text-center text-slate-400">No items match.</td></tr>
             )}
             {shown.map((it) => (
-              <Row key={it.id} item={it} cols={activeCols} onOpen={() => onOpenItem(it.id)} />
+              <Row key={it.id} projectId={projectId} item={it} cols={activeCols} onOpen={() => onOpenItem(it.id)} />
             ))}
           </tbody>
         </table>
@@ -133,7 +133,14 @@ export function ContentItemsTable({
   );
 }
 
-function Row({ item, cols, onOpen }: { item: ItemSummary; cols: ColKey[]; onOpen: () => void }) {
+function Row({
+  projectId, item, cols, onOpen,
+}: {
+  projectId: string;
+  item: ItemSummary;
+  cols: ColKey[];
+  onOpen: () => void;
+}) {
   const cell = (k: ColKey) => {
     switch (k) {
       case 'people':
@@ -171,12 +178,162 @@ function Row({ item, cols, onOpen }: { item: ItemSummary; cols: ColKey[]; onOpen
       </td>
       {cols.map((k) => <td key={k} className="px-4 py-3 text-slate-700">{cell(k)}</td>)}
       <td className="px-4 py-3">
-        <button type="button" onClick={(e) => { e.stopPropagation(); onOpen(); }}
-                className="rounded border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
-          Open
-        </button>
+        <RowActions projectId={projectId} item={item} />
       </td>
     </tr>
+  );
+}
+
+/**
+ * Per-row action menu, mirroring the reference. Only Delete is wired today —
+ * RLS enforces manage_content_items. The rest depend on features not yet built
+ * (assignment, deadlines, workflow transitions, categories, briefs, export) and
+ * render disabled so the full surface is remembered without pretending to work.
+ */
+function RowActions({
+  projectId, item,
+}: {
+  projectId: string;
+  item: ItemSummary;
+}) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  const del = useMutation({
+    mutationFn: () => api.deleteItem(item.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['items', projectId] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      setConfirm(false);
+      setOpen(false);
+    },
+  });
+
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+
+  return (
+    <div ref={ref} className="relative" onClick={stop}>
+      <button type="button" onClick={() => setOpen((v) => !v)} title="Actions"
+              className="grid h-8 w-8 place-items-center rounded text-slate-500 hover:bg-slate-100">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl">
+          <MenuItem icon="assign" label="Assign people" disabled />
+          <MenuItem icon="calendar" label="Manage due dates" disabled />
+          <MenuItem icon="status" label="Change status" disabled />
+          <MenuItem icon="template" label="Change template" disabled />
+          <MenuItem icon="folder" label="Change category" disabled />
+          <MenuItem icon="duplicate" label="Duplicate item" disabled />
+          <MenuItem icon="brief" label="Convert to Brief" disabled />
+          <MenuItem icon="cloud" label="Export to DOCX" disabled />
+          <MenuItem icon="cloud" label="Export to HTML" disabled />
+          <div className="my-1.5 border-t border-slate-100" />
+          <MenuItem icon="trash" label="Delete" danger onClick={() => setConfirm(true)} />
+        </div>
+      )}
+
+      {confirm && (
+        <ConfirmDelete
+          name={item.name}
+          pending={del.isPending}
+          error={del.isError}
+          onCancel={() => setConfirm(false)}
+          onConfirm={() => del.mutate()}
+        />
+      )}
+    </div>
+  );
+}
+
+type IconKey = 'assign' | 'calendar' | 'status' | 'template' | 'folder' | 'duplicate' | 'brief' | 'cloud' | 'trash';
+
+function MenuItem({
+  icon, label, disabled, danger, onClick,
+}: {
+  icon: IconKey;
+  label: string;
+  disabled?: boolean;
+  danger?: boolean;
+  onClick?: () => void;
+}) {
+  const tone = disabled
+    ? 'text-slate-300 cursor-not-allowed'
+    : danger
+      ? 'text-red-600 hover:bg-red-50'
+      : 'text-slate-700 hover:bg-slate-50';
+  return (
+    <button type="button" disabled={disabled} onClick={onClick}
+            title={disabled ? 'Coming soon' : undefined}
+            className={`flex w-full items-center gap-3 px-4 py-2 text-left text-[14px] ${tone}`}>
+      <ActionIcon icon={icon} />
+      {label}
+    </button>
+  );
+}
+
+function ActionIcon({ icon }: { icon: IconKey }) {
+  const p = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8 } as const;
+  switch (icon) {
+    case 'assign': return <svg {...p}><circle cx="9" cy="8" r="3.2" /><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6" /></svg>;
+    case 'calendar': return <svg {...p}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 9h18M8 3v4M16 3v4" /></svg>;
+    case 'status': return <svg {...p}><path d="M4 8h13l-3-3M20 16H7l3 3" /></svg>;
+    case 'template': return <svg {...p}><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></svg>;
+    case 'folder': return <svg {...p}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>;
+    case 'duplicate': return <svg {...p}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>;
+    case 'brief': return <svg {...p}><path d="M4 6h16M4 12h10M4 18h16" /></svg>;
+    case 'cloud': return <svg {...p}><path d="M17 18a4 4 0 0 0 0-8 5 5 0 0 0-9.6-1.3A3.5 3.5 0 0 0 7 18z" /></svg>;
+    case 'trash': return <svg {...p}><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" /></svg>;
+  }
+}
+
+function ConfirmDelete({
+  name, pending, error, onCancel, onConfirm,
+}: {
+  name: string;
+  pending: boolean;
+  error: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/40 p-4"
+         onMouseDown={onCancel} onClick={(e) => e.stopPropagation()}>
+      <div onMouseDown={(e) => e.stopPropagation()} className="w-[440px] max-w-full rounded-lg bg-white shadow-2xl">
+        <div className="px-6 py-5">
+          <h2 className="text-[18px] font-semibold text-slate-900">Delete content item?</h2>
+          <p className="mt-2 text-[15px] text-slate-600">
+            <span className="font-medium text-slate-800">{name}</span> and all of its field values,
+            assignees, and history will be permanently removed. This cannot be undone.
+          </p>
+          {error && <p className="mt-3 text-sm text-red-600">Couldn’t delete — you may not have permission.</p>}
+        </div>
+        <footer className="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
+          <button type="button" onClick={onCancel}
+                  className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button type="button" disabled={pending} onClick={onConfirm}
+                  className="rounded-md bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-40">
+            {pending ? 'Deleting…' : 'Delete'}
+          </button>
+        </footer>
+      </div>
+    </div>
   );
 }
 

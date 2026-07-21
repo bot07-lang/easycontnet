@@ -166,6 +166,30 @@ export class ContentService {
     }
   }
 
+  /**
+   * Delete a content item. RLS's delete policy requires manage_content_items +
+   * project membership; field values and assignees cascade away. Zero rows means
+   * the caller couldn't see or delete it.
+   */
+  async deleteItem(user: UserContext, itemId: string) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const { rowCount } = await c.query(
+          `delete from public.content_items where id = $1`,
+          [itemId],
+        );
+        if (!rowCount) throw new NotFoundException('Item not found');
+        return { ok: true as const };
+      });
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === RLS_VIOLATION || code === FK_VIOLATION) {
+        throw new ForbiddenException('You cannot delete this item');
+      }
+      throw err;
+    }
+  }
+
   private async loadItem(c: PoolClient, itemId: string) {
     const { rows } = await c.query(
       `select ci.id, ci.item_number, ci.name, ci.template_id,

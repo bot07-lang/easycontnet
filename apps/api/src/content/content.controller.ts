@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   Param,
@@ -64,6 +65,13 @@ export class ContentController {
   @Get('items/:id')
   getItem(@CurrentUser() user: UserContext, @Param('id') id: string) {
     return this.content.getItem(user, id);
+  }
+
+  /** Delete an item. manage_content_items in both code and RLS. */
+  @Delete('items/:id')
+  @RequirePermission('manage_content_items')
+  deleteItem(@CurrentUser() user: UserContext, @Param('id') id: string) {
+    return this.content.deleteItem(user, id);
   }
 
   // The field-save rule is "assigned to the current status OR holds

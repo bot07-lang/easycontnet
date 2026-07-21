@@ -110,6 +110,45 @@ export interface OrgUser {
   role_name: string;
 }
 
+export interface WorkflowRole {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+export interface WorkflowMember {
+  id: string;
+  name: string;
+}
+export interface WorkflowStatus {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+  is_initial: boolean;
+  is_terminal: boolean;
+  auto_due_days: number | null;
+  read_only: boolean;
+  reviewing_role_ids: string[];
+  default_assignees: WorkflowMember[];
+}
+export interface WorkflowRating {
+  id: string;
+  name: string;
+  description: string | null;
+  position: number;
+  status_id: string;
+  status_name: string;
+  status_color: string;
+}
+export interface WorkflowConfig {
+  project: { id: string; name: string };
+  auto_complete_on_publish: boolean;
+  roles: WorkflowRole[];
+  members: WorkflowMember[];
+  statuses: WorkflowStatus[];
+  ratings: WorkflowRating[];
+}
+
 export const api = {
   getDashboard: (archived = false) =>
     request<Dashboard>(`/dashboard${archived ? '?archived=true' : ''}`),
@@ -149,6 +188,29 @@ export const api = {
         description: opts?.description ?? null,
         keywords: opts?.keywords ?? [],
       }),
+    }),
+  deleteItem: (id: string) =>
+    request<{ ok: true }>(`/content/items/${id}`, { method: 'DELETE' }),
+  getWorkflow: (projectId: string) =>
+    request<WorkflowConfig>(`/projects/${projectId}/workflow`),
+  updateStatus: (
+    statusId: string,
+    patch: {
+      name?: string;
+      color?: string;
+      autoDueDays?: number | null;
+      readOnly?: boolean;
+      reviewingRoleIds?: string[];
+    },
+  ) =>
+    request<{ ok: true }>(`/workflow/statuses/${statusId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  setDefaultAssignees: (statusId: string, profileIds: string[]) =>
+    request<{ ok: true }>(`/workflow/statuses/${statusId}/default-assignees`, {
+      method: 'PUT',
+      body: JSON.stringify({ profileIds }),
     }),
   saveField: (itemId: string, fieldId: string, value: unknown) =>
     request<{ ok: true }>(`/content/items/${itemId}/fields/${fieldId}`, {
