@@ -190,6 +190,116 @@ export class ContentService {
     }
   }
 
+  /** Rename a content item (manage_content_items). */
+  async renameItem(user: UserContext, itemId: string, name: string) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const { rowCount } = await c.query(
+          `update public.content_items set name = $2, updated_at = now() where id = $1`,
+          [itemId, name.trim()],
+        );
+        if (!rowCount) throw new NotFoundException('Item not found');
+        return { ok: true as const };
+      });
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot rename this item');
+      throw err;
+    }
+  }
+
+  /**
+   * Manual status change (manage_content_items). Any status → any status in the
+   * item's own project. Per the docs this "clears all reviews" — there is no
+   * reviews feature yet, so that is a no-op today. Assignees are stored per
+   * status, so moving current_status_id automatically makes the target status's
+   * assignees the item's current people.
+   */
+  async changeStatus(user: UserContext, itemId: string, statusId: string) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const valid = await c.query(
+          `select 1 from public.content_items ci
+             join public.workflow_statuses s on s.id = $2 and s.project_id = ci.project_id
+            where ci.id = $1`,
+          [itemId, statusId],
+        );
+        if (!valid.rowCount) throw new NotFoundException('That status is not in this item’s project');
+        const { rowCount } = await c.query(
+          `update public.content_items set current_status_id = $2, updated_at = now() where id = $1`,
+          [itemId, statusId],
+        );
+        if (!rowCount) throw new ForbiddenException('You cannot change this item');
+        return { ok: true as const };
+      });
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot change this item');
+      throw err;
+    }
+  }
+
+  /**
+   * Everything the assign-people panel needs: the item's project ladder with,
+   * per status, its reviewing roles and the item's current assignees; plus the
+   * project members (with role) so the UI can offer only those whose role is a
+   * reviewing role for a given status (gate 3).
+   */
+  async getAssignmentInfo(user: UserContext, itemId: string) {
+    return this.db.withUser(user, async (c) => {
+      const item = (
+        await c.query(`select project_id, current_status_id from public.content_items where id = $1`, [itemId])
+      ).rows[0];
+      if (!item) throw new NotFoundException('Item not found');
+
+      const statuses = (
+        await c.query(
+          `select s.id, s.name, s.color, s.position, s.is_initial, s.is_terminal,
+                  coalesce((select jsonb_agg(rr.role_id) from public.status_reviewing_roles rr where rr.status_id = s.id), '[]'::jsonb) as reviewing_role_ids,
+                  coalesce((select jsonb_agg(jsonb_build_object('id', pr.id, 'name', pr.full_name) order by pr.full_name)
+                            from public.item_status_assignees a join public.profiles pr on pr.id = a.profile_id
+                            where a.item_id = $1 and a.status_id = s.id), '[]'::jsonb) as assignees
+             from public.workflow_statuses s where s.project_id = $2 order by s.position`,
+          [itemId, item.project_id],
+        )
+      ).rows;
+
+      const members = (
+        await c.query(
+          `select pr.id, pr.full_name as name, pr.role_id
+             from public.project_members pm join public.profiles pr on pr.id = pm.profile_id
+            where pm.project_id = $1 order by pr.full_name`,
+          [item.project_id],
+        )
+      ).rows;
+
+      return { currentStatusId: item.current_status_id as string | null, statuses, members };
+    });
+  }
+
+  /**
+   * Replace the item's assignees for one status (manage_people_and_deadlines).
+   * RLS enforces the permission and project membership.
+   */
+  async setStatusAssignees(user: UserContext, itemId: string, statusId: string, profileIds: string[]) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        await c.query(`delete from public.item_status_assignees where item_id = $1 and status_id = $2`, [itemId, statusId]);
+        for (const pid of profileIds) {
+          await c.query(
+            `insert into public.item_status_assignees (item_id, status_id, profile_id, org_id) values ($1, $2, $3, $4)`,
+            [itemId, statusId, pid, user.orgId],
+          );
+        }
+        return { ok: true as const };
+      });
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot assign people to this item');
+      throw err;
+    }
+  }
+
   private async loadItem(c: PoolClient, itemId: string) {
     const { rows } = await c.query(
       `select ci.id, ci.item_number, ci.name, ci.template_id,

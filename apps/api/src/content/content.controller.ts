@@ -6,6 +6,7 @@ import {
   Get,
   Inject,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -72,6 +73,45 @@ export class ContentController {
   @RequirePermission('manage_content_items')
   deleteItem(@CurrentUser() user: UserContext, @Param('id') id: string) {
     return this.content.deleteItem(user, id);
+  }
+
+  /** Rename an item. manage_content_items (code); RLS enforces membership. */
+  @Patch('items/:id')
+  @RequirePermission('manage_content_items')
+  rename(@CurrentUser() user: UserContext, @Param('id') id: string, @Body() body: { name?: string }) {
+    const name = body?.name?.trim();
+    if (!name) throw new BadRequestException('name is required');
+    return this.content.renameItem(user, id, name);
+  }
+
+  /** Manual status change. manage_content_items (code); RLS enforces membership. */
+  @Patch('items/:id/status')
+  @RequirePermission('manage_content_items')
+  changeStatus(
+    @CurrentUser() user: UserContext,
+    @Param('id') id: string,
+    @Body() body: { statusId?: string },
+  ) {
+    if (!body?.statusId) throw new BadRequestException('statusId is required');
+    return this.content.changeStatus(user, id, body.statusId);
+  }
+
+  /** Data for the assign-people panel: statuses (+reviewing roles +assignees) and members. */
+  @Get('items/:id/assignment')
+  getAssignment(@CurrentUser() user: UserContext, @Param('id') id: string) {
+    return this.content.getAssignmentInfo(user, id);
+  }
+
+  /** Set the item's assignees for one status. manage_people_and_deadlines (code + RLS). */
+  @Put('items/:id/statuses/:statusId/assignees')
+  @RequirePermission('manage_people_and_deadlines')
+  setAssignees(
+    @CurrentUser() user: UserContext,
+    @Param('id') id: string,
+    @Param('statusId') statusId: string,
+    @Body() body: { profileIds?: string[] },
+  ) {
+    return this.content.setStatusAssignees(user, id, statusId, body?.profileIds ?? []);
   }
 
   // The field-save rule is "assigned to the current status OR holds

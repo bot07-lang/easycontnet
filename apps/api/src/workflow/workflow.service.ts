@@ -164,6 +164,174 @@ export class WorkflowService {
   }
 
   /**
+   * Create a new status (manage_workflow). It is always a middle status —
+   * never initial or terminal — so it slots in just before the terminal one.
+   * We free the terminal's position slot by pushing it up, then drop the new
+   * status into the vacated slot, keeping the ladder ordered without a full
+   * renumber.
+   */
+  async createStatus(
+    user: UserContext,
+    projectId: string,
+    patch: {
+      name: string;
+      color: string;
+      autoDueDays?: number | null;
+      readOnly?: boolean;
+      reviewingRoleIds?: string[];
+    },
+  ) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const terminal = (
+          await c.query(
+            `select id, position from public.workflow_statuses
+              where project_id = $1 and is_terminal`,
+            [projectId],
+          )
+        ).rows[0];
+
+        let position: number;
+        if (terminal) {
+          await c.query(`update public.workflow_statuses set position = position + 2048 where id = $1`, [
+            terminal.id,
+          ]);
+          position = terminal.position;
+        } else {
+          position = (
+            await c.query(
+              `select coalesce(max(position), 0) + 1024 as p from public.workflow_statuses where project_id = $1`,
+              [projectId],
+            )
+          ).rows[0].p;
+        }
+
+        const { rows } = await c.query(
+          `insert into public.workflow_statuses
+             (org_id, project_id, name, color, position, auto_due_days, read_only)
+           values ($1, $2, $3, $4, $5, $6, $7)
+           returning id`,
+          [
+            user.orgId,
+            projectId,
+            patch.name.trim(),
+            patch.color,
+            position,
+            patch.autoDueDays ?? null,
+            patch.readOnly ?? false,
+          ],
+        );
+        const statusId = rows[0].id as string;
+
+        for (const roleId of patch.reviewingRoleIds ?? []) {
+          await c.query(
+            `insert into public.status_reviewing_roles (status_id, role_id) values ($1, $2)`,
+            [statusId, roleId],
+          );
+        }
+        return { id: statusId };
+      });
+    } catch (err) {
+      throw mapWriteError(err);
+    }
+  }
+
+  /**
+   * Delete a status (manage_workflow). The initial and terminal statuses are
+   * pinned and cannot be removed — an item must have somewhere to enter and to
+   * rest. Content items in a deleted status would violate their FK, so the DB
+   * rejects deletion while any item still sits there; we surface that clearly.
+   */
+  async deleteStatus(user: UserContext, statusId: string) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const s = (
+          await c.query(
+            `select is_initial, is_terminal from public.workflow_statuses where id = $1`,
+            [statusId],
+          )
+        ).rows[0];
+        if (!s) throw new NotFoundException('Status not found');
+        if (s.is_initial || s.is_terminal) {
+          throw new ForbiddenException('The first and last statuses cannot be deleted');
+        }
+        const { rowCount } = await c.query(`delete from public.workflow_statuses where id = $1`, [statusId]);
+        if (!rowCount) throw new ForbiddenException('You cannot delete this status');
+        return { ok: true as const };
+      });
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === '23503') {
+        throw new ForbiddenException('This status still has content items in it — move them first');
+      }
+      throw mapWriteError(err);
+    }
+  }
+
+  /** Create a rating criterion (manage_workflow). */
+  async createRating(
+    user: UserContext,
+    projectId: string,
+    patch: { name: string; description: string | null; statusId: string },
+  ) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const { rows } = await c.query(
+          `insert into public.workflow_ratings (org_id, project_id, status_id, name, description, position)
+           values ($1, $2, $3, $4, $5,
+                   (select coalesce(max(position), 0) + 1024 from public.workflow_ratings where project_id = $2))
+           returning id`,
+          [user.orgId, projectId, patch.statusId, patch.name.trim(), patch.description],
+        );
+        return { id: rows[0].id as string };
+      });
+    } catch (err) {
+      throw mapWriteError(err, 'You cannot add ratings to this workflow');
+    }
+  }
+
+  /** Update a rating criterion (manage_workflow). */
+  async updateRating(
+    user: UserContext,
+    ratingId: string,
+    patch: { name?: string; description?: string | null; statusId?: string },
+  ) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const sets: string[] = [];
+        const vals: unknown[] = [];
+        const push = (frag: string, val: unknown) => { vals.push(val); sets.push(`${frag} = $${vals.length}`); };
+        if (patch.name !== undefined) push('name', patch.name.trim());
+        if (patch.description !== undefined) push('description', patch.description);
+        if (patch.statusId !== undefined) push('status_id', patch.statusId);
+        if (!sets.length) return { ok: true as const };
+        vals.push(ratingId);
+        const { rowCount } = await c.query(
+          `update public.workflow_ratings set ${sets.join(', ')} where id = $${vals.length}`,
+          vals,
+        );
+        if (!rowCount) throw new NotFoundException('Rating not found');
+        return { ok: true as const };
+      });
+    } catch (err) {
+      throw mapWriteError(err, 'You cannot edit this rating');
+    }
+  }
+
+  /** Delete a rating criterion (manage_workflow). */
+  async deleteRating(user: UserContext, ratingId: string) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const { rowCount } = await c.query(`delete from public.workflow_ratings where id = $1`, [ratingId]);
+        if (!rowCount) throw new NotFoundException('Rating not found');
+        return { ok: true as const };
+      });
+    } catch (err) {
+      throw mapWriteError(err, 'You cannot delete this rating');
+    }
+  }
+
+  /**
    * Replace a status's default assignees (manage_people_and_deadlines). Kept
    * separate from updateStatus because it is a different responsibility and a
    * different permission — a user may configure the ladder without being able

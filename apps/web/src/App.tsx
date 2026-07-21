@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from './lib/api';
 import { useSession } from './lib/session';
@@ -8,6 +8,8 @@ import { AllProjects } from './components/AllProjects';
 import { ContentItemsTable } from './components/ContentItemsTable';
 import { CreateItemDialog } from './components/CreateItemDialog';
 import { WorkflowSettings } from './components/WorkflowSettings';
+import { TemplatesGrid } from './components/TemplatesGrid';
+import { TemplateBuilder } from './components/TemplateBuilder';
 import { Sidebar, IMPLEMENTED, type NavKey } from './components/Sidebar';
 
 /**
@@ -112,10 +114,27 @@ function ProjectView({
     enabled: nav === 'content',
   });
 
+  // The template whose builder is open (templates nav only). Reset when the
+  // project changes so we never show another project's template.
+  const [openTemplateId, setOpenTemplateId] = useState<string | null>(null);
+  useEffect(() => { setOpenTemplateId(null); }, [projectId]);
+
   if (nav === 'workflow') {
     return (
       <div className="h-full overflow-y-auto p-6">
         <WorkflowSettings projectId={projectId} />
+      </div>
+    );
+  }
+
+  if (nav === 'templates') {
+    return (
+      <div className="h-full overflow-y-auto p-6">
+        {openTemplateId ? (
+          <TemplateBuilder templateId={openTemplateId} onBack={() => setOpenTemplateId(null)} />
+        ) : (
+          <TemplatesGrid projectId={projectId} onOpenTemplate={setOpenTemplateId} />
+        )}
       </div>
     );
   }

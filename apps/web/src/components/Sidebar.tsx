@@ -20,7 +20,7 @@ export const IMPLEMENTED: Record<NavKey, boolean> = {
   files: false,
   documentation: false,
   workflow: true,
-  templates: false,
+  templates: true,
   categories: false,
 };
 

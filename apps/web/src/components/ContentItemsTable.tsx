@@ -17,6 +17,23 @@ const COLUMNS: { key: ColKey; label: string; defaultOn: boolean }[] = [
 
 type Filter = 'all' | 'assigned' | 'unassigned' | 'mine';
 
+// Title and Status are fixed columns; the rest come from ColKey.
+type SortKey = 'title' | 'status' | ColKey;
+
+/** Comparable value for a column, or null when the column has no data to sort by. */
+function sortValue(it: ItemSummary, key: SortKey): string | number | null {
+  switch (key) {
+    case 'title': return it.name.toLowerCase();
+    case 'status': return it.status_name?.toLowerCase() ?? null;
+    case 'people': return it.people.length;
+    case 'due': return it.next_due_date ? new Date(it.next_due_date).getTime() : null;
+    case 'template': return it.template_name?.toLowerCase() ?? null;
+    case 'lastUpdated':
+    case 'timeInStatus': return new Date(it.updated_at).getTime();
+    default: return null; // categories, tags — not populated yet
+  }
+}
+
 export function ContentItemsTable({
   projectId,
   onOpenItem,
@@ -35,17 +52,33 @@ export function ContentItemsTable({
   const [manageOpen, setManageOpen] = useState(false);
   const [cols, setCols] = useState<ColKey[]>(COLUMNS.filter((c) => c.defaultOn).map((c) => c.key));
   const [order, setOrder] = useState<ColKey[]>(COLUMNS.map((c) => c.key));
+  // Column sort: click a header to cycle asc → desc → off.
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(null);
+  const toggleSort = (key: SortKey) =>
+    setSort((s) => (!s || s.key !== key ? { key, dir: 'asc' } : s.dir === 'asc' ? { key, dir: 'desc' } : null));
 
   const shown = useMemo(() => {
-    let list = items.data ?? [];
+    let list = [...(items.data ?? [])];
     const q = search.trim().toLowerCase();
     if (q) list = list.filter((i) => i.name.toLowerCase().includes(q));
     if (filter === 'assigned') list = list.filter((i) => i.people.length > 0);
     if (filter === 'unassigned') list = list.filter((i) => i.people.length === 0);
     if (filter === 'mine') list = list.filter((i) => i.mine);
     if (hideCompleted) list = list.filter((i) => !i.is_terminal);
+    if (sort) {
+      list.sort((a, b) => {
+        const av = sortValue(a, sort.key);
+        const bv = sortValue(b, sort.key);
+        // Empty values always sort last, regardless of direction.
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        const r = av < bv ? -1 : av > bv ? 1 : 0;
+        return sort.dir === 'asc' ? r : -r;
+      });
+    }
     return list;
-  }, [items.data, search, filter, hideCompleted]);
+  }, [items.data, search, filter, hideCompleted, sort]);
 
   const activeCols = order.filter((k) => cols.includes(k));
 
@@ -98,12 +131,10 @@ export function ContentItemsTable({
         <table className="w-full text-left text-sm">
           <thead className="sticky top-0 bg-slate-50 text-slate-700">
             <tr className="border-b border-slate-200">
-              <th className="px-4 py-3 font-semibold">Title</th>
-              <th className="px-4 py-3 font-semibold">Status</th>
+              <SortTh label="Title" sortKey="title" sort={sort} onSort={toggleSort} />
+              <SortTh label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
               {activeCols.map((k) => (
-                <th key={k} className="px-4 py-3 font-semibold">
-                  {COLUMNS.find((c) => c.key === k)!.label}
-                </th>
+                <SortTh key={k} label={COLUMNS.find((c) => c.key === k)!.label} sortKey={k} sort={sort} onSort={toggleSort} />
               ))}
               <th className="px-4 py-3 font-semibold">Action</th>
             </tr>
@@ -141,16 +172,25 @@ function Row({
   cols: ColKey[];
   onOpen: () => void;
 }) {
+  const [assign, setAssign] = useState(false);
+  const openAssign = (e: React.MouseEvent) => { e.stopPropagation(); setAssign(true); };
   const cell = (k: ColKey) => {
     switch (k) {
       case 'people':
-        return item.people.length === 0
-          ? <span className="text-slate-400">—</span>
-          : <span className="flex -space-x-2">{item.people.slice(0, 3).map((p) => (
+        return item.people.length === 0 ? (
+          <button type="button" onClick={openAssign} title="Assign people"
+                  className="grid h-7 w-7 place-items-center rounded-full border border-dashed border-slate-300 text-slate-400 hover:border-slate-400 hover:text-slate-600">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.2" /><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6" /></svg>
+          </button>
+        ) : (
+          <button type="button" onClick={openAssign} title="Edit assignees" className="flex -space-x-2">
+            {item.people.slice(0, 3).map((p) => (
               <span key={p.name} title={p.name}
                     className="grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[10px] font-semibold text-white"
                     style={{ background: avatarColor(p.name) }}>{initials(p.name)}</span>
-            ))}</span>;
+            ))}
+          </button>
+        );
       case 'due':
         return item.next_due_date ? new Date(item.next_due_date).toLocaleDateString() : <span className="text-slate-400">—</span>;
       case 'template':
@@ -167,7 +207,9 @@ function Row({
 
   return (
     <tr className="cursor-pointer border-b border-slate-100 hover:bg-slate-50" onClick={onOpen}>
-      <td className="px-4 py-3 font-medium text-slate-800">{item.name}</td>
+      <td className="px-4 py-3">
+        <TitleCell projectId={projectId} item={item} onOpen={onOpen} />
+      </td>
       <td className="px-4 py-3">
         {item.status_name ? (
           <span className="inline-flex items-center gap-2">
@@ -179,8 +221,51 @@ function Row({
       {cols.map((k) => <td key={k} className="px-4 py-3 text-slate-700">{cell(k)}</td>)}
       <td className="px-4 py-3">
         <RowActions projectId={projectId} item={item} />
+        {assign && <AssignPeopleDialog projectId={projectId} item={item} onClose={() => setAssign(false)} />}
       </td>
     </tr>
+  );
+}
+
+/** Item title: a blue link (opens the item) with a pencil that turns it into an inline rename. */
+function TitleCell({ projectId, item, onOpen }: { projectId: string; item: ItemSummary; onOpen: () => void }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(item.name);
+  const rename = useMutation({
+    mutationFn: () => api.renameItem(item.id, name.trim()),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['items', projectId] }); setEditing(false); },
+  });
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+
+  if (editing) {
+    return (
+      <span className="flex items-center gap-1.5" onClick={stop}>
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)}
+               onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) rename.mutate(); if (e.key === 'Escape') { setName(item.name); setEditing(false); } }}
+               className="w-56 rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100" />
+        <button type="button" disabled={!name.trim() || rename.isPending} onClick={() => rename.mutate()} title="Save"
+                className="grid h-7 w-7 place-items-center rounded text-slate-500 hover:bg-slate-100 disabled:opacity-40">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" /><path d="M8 3v6h7M8 21v-7h8v7" /></svg>
+        </button>
+        <button type="button" onClick={() => { setName(item.name); setEditing(false); }} title="Cancel"
+                className="grid h-7 w-7 place-items-center rounded text-slate-400 hover:bg-slate-100">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span className="group inline-flex items-center gap-2">
+      <button type="button" onClick={(e) => { stop(e); onOpen(); }} className="font-medium text-blue-600 hover:underline">
+        {item.name}
+      </button>
+      <button type="button" onClick={(e) => { stop(e); setEditing(true); }} title="Rename"
+              className="opacity-0 transition group-hover:opacity-100 text-slate-400 hover:text-slate-600">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+      </button>
+    </span>
   );
 }
 
@@ -199,6 +284,8 @@ function RowActions({
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [changeStatus, setChangeStatus] = useState(false);
+  const [assign, setAssign] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -233,9 +320,9 @@ function RowActions({
 
       {open && (
         <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl">
-          <MenuItem icon="assign" label="Assign people" disabled />
+          <MenuItem icon="assign" label="Assign people" onClick={() => { setOpen(false); setAssign(true); }} />
           <MenuItem icon="calendar" label="Manage due dates" disabled />
-          <MenuItem icon="status" label="Change status" disabled />
+          <MenuItem icon="status" label="Change status" onClick={() => { setOpen(false); setChangeStatus(true); }} />
           <MenuItem icon="template" label="Change template" disabled />
           <MenuItem icon="folder" label="Change category" disabled />
           <MenuItem icon="duplicate" label="Duplicate item" disabled />
@@ -255,6 +342,12 @@ function RowActions({
           onCancel={() => setConfirm(false)}
           onConfirm={() => del.mutate()}
         />
+      )}
+      {changeStatus && (
+        <ChangeStatusDialog projectId={projectId} item={item} onClose={() => setChangeStatus(false)} />
+      )}
+      {assign && (
+        <AssignPeopleDialog projectId={projectId} item={item} onClose={() => setAssign(false)} />
       )}
     </div>
   );
@@ -420,19 +513,270 @@ function ManageColumns({
   );
 }
 
+/** Shared modal shell for the row-action dialogs. */
+function Modal({
+  title, children, footer, onClose,
+}: {
+  title: string;
+  children: React.ReactNode;
+  footer: React.ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/40 p-4"
+         onMouseDown={onClose} onClick={(e) => e.stopPropagation()}>
+      <div onMouseDown={(e) => e.stopPropagation()} className="max-h-[85vh] w-[500px] max-w-full overflow-y-auto rounded-lg bg-white shadow-2xl">
+        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <h2 className="text-[19px] font-semibold text-slate-900">{title}</h2>
+          <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded text-slate-500 hover:bg-slate-100">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </header>
+        <div className="px-6 py-5">{children}</div>
+        <footer className="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">{footer}</footer>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Manual status change (manage_content_items). Per the docs this clears reviews
+ * and offers no feedback — an escape hatch. Any status → any status.
+ */
+function ChangeStatusDialog({ projectId, item, onClose }: { projectId: string; item: ItemSummary; onClose: () => void }) {
+  const qc = useQueryClient();
+  const wf = useQuery({ queryKey: ['workflow', projectId], queryFn: () => api.getWorkflow(projectId) });
+  const statuses = wf.data?.statuses ?? [];
+  const [statusId, setStatusId] = useState('');
+  if (!statusId && statuses.length) setStatusId(statuses.find((s) => s.name === item.status_name)?.id ?? statuses[0]!.id);
+
+  const change = useMutation({
+    mutationFn: () => api.changeItemStatus(item.id, statusId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['items', projectId] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      onClose();
+    },
+  });
+
+  return (
+    <Modal title="Change status" onClose={onClose}
+           footer={
+             <>
+               <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+               <button type="button" disabled={!statusId || change.isPending} onClick={() => change.mutate()}
+                       className="rounded-md bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40">
+                 {change.isPending ? 'Changing…' : 'Change status'}
+               </button>
+             </>
+           }>
+      <p className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-[13px] text-amber-700">
+        Manually changing status moves the item without submit/approve. It clears any reviews, and no feedback is recorded.
+      </p>
+      {wf.isLoading ? (
+        <p className="text-sm text-slate-400">Loading statuses…</p>
+      ) : (
+        <div className="space-y-1">
+          {statuses.map((s) => (
+            <label key={s.id} className="flex cursor-pointer items-center gap-2.5 rounded px-1 py-1.5 text-[15px] text-slate-800 hover:bg-slate-50">
+              <input type="radio" checked={statusId === s.id} onChange={() => setStatusId(s.id)} className="h-4 w-4 accent-blue-600" />
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: s.color }} />
+              {s.name}
+            </label>
+          ))}
+        </div>
+      )}
+      {change.isError && <p className="mt-3 text-sm text-red-600">Couldn’t change — you may need the “manage content items” permission.</p>}
+    </Modal>
+  );
+}
+
+/**
+ * Assign people per workflow status (manage_people_and_deadlines). Only members
+ * whose role is a reviewing role for a given status can be assigned to it
+ * (gate 3). Terminal status takes no assignees.
+ */
+function AssignPeopleDialog({ projectId, item, onClose }: { projectId: string; item: ItemSummary; onClose: () => void }) {
+  const qc = useQueryClient();
+  const info = useQuery({ queryKey: ['assignment', item.id], queryFn: () => api.getAssignmentInfo(item.id) });
+  const [sel, setSel] = useState<Record<string, Set<string>>>({});
+
+  useEffect(() => {
+    if (!info.data) return;
+    const init: Record<string, Set<string>> = {};
+    for (const s of info.data.statuses) init[s.id] = new Set(s.assignees.map((a) => a.id));
+    setSel(init);
+  }, [info.data]);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const data = info.data!;
+      for (const s of data.statuses) {
+        if (s.is_terminal) continue;
+        const before = new Set(s.assignees.map((a) => a.id));
+        const now = sel[s.id] ?? new Set<string>();
+        const changed = before.size !== now.size || [...now].some((id) => !before.has(id));
+        if (changed) await api.setStatusAssignees(item.id, s.id, [...now]);
+      }
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['items', projectId] });
+      void qc.invalidateQueries({ queryKey: ['assignment', item.id] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      onClose();
+    },
+  });
+
+  const toggle = (statusId: string, pid: string) =>
+    setSel((prev) => {
+      const next = { ...prev };
+      const set = new Set(next[statusId]);
+      set.has(pid) ? set.delete(pid) : set.add(pid);
+      next[statusId] = set;
+      return next;
+    });
+
+  const data = info.data;
+
+  return (
+    <Modal title="Assign people" onClose={onClose}
+           footer={
+             <>
+               <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+               <button type="button" disabled={!data || save.isPending} onClick={() => save.mutate()}
+                       className="rounded-md bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40">
+                 {save.isPending ? 'Saving…' : 'Save'}
+               </button>
+             </>
+           }>
+      {info.isLoading || !data ? (
+        <p className="text-sm text-slate-400">Loading…</p>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-[13px] text-slate-500">
+            Assignment is per status. Only members whose role can review a status appear under it.
+          </p>
+          {data.statuses.filter((s) => !s.is_terminal).map((s) => {
+            const assignable = data.members.filter((m) => s.reviewing_role_ids.includes(m.role_id));
+            return (
+              <div key={s.id}>
+                <div className="mb-1.5 flex items-center gap-2 text-[15px] font-medium text-slate-800">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: s.color }} />
+                  {s.name}
+                  {s.id === data.currentStatusId && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500">current</span>}
+                </div>
+                {assignable.length === 0 ? (
+                  <p className="pl-4 text-[13px] text-slate-400">No members have a reviewing role for this status.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-1 pl-1">
+                    {assignable.map((m) => (
+                      <label key={m.id} className="flex cursor-pointer items-center gap-2.5 rounded px-1 py-1 text-[14px] text-slate-800 hover:bg-slate-50">
+                        <input type="checkbox" checked={sel[s.id]?.has(m.id) ?? false} onChange={() => toggle(s.id, m.id)} className="h-4 w-4 accent-blue-600" />
+                        {m.name}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {save.isError && <p className="mt-3 text-sm text-red-600">Couldn’t save — you may need the “manage people & deadlines” permission.</p>}
+    </Modal>
+  );
+}
+
+/**
+ * Split "+ Item" button: the left half creates a single item; the chevron opens
+ * a menu (Add multiple items · Add folder · Export all items). Those three are
+ * unbuilt features (bulk create, folders, export), so they're present but
+ * disabled — the surface is mirrored without inventing behavior.
+ */
 function NewItemButton({ projectId, onCreated }: { projectId: string; onCreated: (id: string) => void }) {
   const [open, setOpen] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setMenu(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menu]);
+
   return (
-    <>
+    <div ref={ref} className="relative flex">
       <button type="button" onClick={() => setOpen(true)}
-              className="flex items-center gap-2 rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700">
+              className="flex items-center gap-2 rounded-l-md border-r border-green-700 bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700">
         <span className="text-lg leading-none">+</span> Item
       </button>
+      <button type="button" onClick={() => setMenu((v) => !v)} title="More"
+              className="grid w-8 place-items-center rounded-r-md bg-green-600 text-white hover:bg-green-700">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
+      </button>
+
+      {menu && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-60 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl">
+          <ItemMenuOpt label="Add multiple items"
+                       icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3" y="5" width="14" height="16" rx="2" /><path d="M21 7v12a2 2 0 0 1-2 2h-9M8 11h4M10 9v4" /></svg>} />
+          <ItemMenuOpt label="Add folder"
+                       icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>} />
+          <ItemMenuOpt label="Export all items"
+                       icon={<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M17 18a4 4 0 0 0 0-8 5 5 0 0 0-9.6-1.3A3.5 3.5 0 0 0 7 18z" /></svg>} />
+        </div>
+      )}
+
       {open && (
         <CreateItemDialog projectId={projectId} onClose={() => setOpen(false)}
                           onCreated={(id) => { setOpen(false); onCreated(id); }} />
       )}
-    </>
+    </div>
+  );
+}
+
+/** Disabled item-menu option — the underlying feature isn't built yet. */
+function ItemMenuOpt({ label, icon }: { label: string; icon: React.ReactNode }) {
+  return (
+    <button type="button" disabled title="Coming soon"
+            className="flex w-full cursor-not-allowed items-center gap-3 px-4 py-2.5 text-left text-[14px] text-slate-400">
+      {icon}
+      {label}
+      <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">Soon</span>
+    </button>
+  );
+}
+
+/** Sortable column header — shows ↕ when inactive, ↑/↓ when it's the active sort. */
+function SortTh({
+  label, sortKey, sort, onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: { key: SortKey; dir: 'asc' | 'desc' } | null;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sort?.key === sortKey;
+  return (
+    <th className="px-4 py-3 font-semibold">
+      <button type="button" onClick={() => onSort(sortKey)}
+              className="inline-flex items-center gap-1 hover:text-slate-900">
+        {label}
+        <SortIcon active={active} dir={active ? sort!.dir : undefined} />
+      </button>
+    </th>
+  );
+}
+
+function SortIcon({ active, dir }: { active: boolean; dir?: 'asc' | 'desc' }) {
+  // Inactive arrows are a clearly-visible slate; the active direction turns blue.
+  const up = active && dir === 'asc' ? '#2563eb' : '#64748b';
+  const down = active && dir === 'desc' ? '#2563eb' : '#64748b';
+  return (
+    <svg width="12" height="15" viewBox="0 0 12 15" aria-hidden>
+      <path d="M6 0L9.5 4.5H2.5z" fill={up} />
+      <path d="M6 15L2.5 10.5h7z" fill={down} />
+    </svg>
   );
 }
 

@@ -149,6 +149,62 @@ export interface WorkflowConfig {
   ratings: WorkflowRating[];
 }
 
+export interface AssignmentStatus {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+  is_initial: boolean;
+  is_terminal: boolean;
+  reviewing_role_ids: string[];
+  assignees: { id: string; name: string }[];
+}
+export interface AssignmentInfo {
+  currentStatusId: string | null;
+  statuses: AssignmentStatus[];
+  members: { id: string; name: string; role_id: string }[];
+}
+
+export interface TemplateSummary {
+  id: string;
+  name: string;
+  is_default: boolean;
+  updated_at: string;
+  tab_count: number;
+  field_count: number;
+  item_count: number;
+}
+export interface TemplateField {
+  id: string;
+  type: string;
+  label: string;
+  position: number;
+  isSystem: boolean;
+  isVisible: boolean;
+  isRequired: boolean;
+  guidelines?: string;
+  isPlainText: boolean;
+  recommendedLength?: number;
+  recommendedLengthUnits?: string;
+  choices: string[];
+  defaultContent?: string;
+}
+export interface TemplateTab {
+  id: string;
+  name: string;
+  position: number;
+  isSystem: boolean;
+  isHidden: boolean;
+  fields: TemplateField[];
+}
+export interface TemplateDetail {
+  id: string;
+  projectId: string;
+  name: string;
+  isDefault: boolean;
+  tabs: TemplateTab[];
+}
+
 export const api = {
   getDashboard: (archived = false) =>
     request<Dashboard>(`/dashboard${archived ? '?archived=true' : ''}`),
@@ -191,6 +247,16 @@ export const api = {
     }),
   deleteItem: (id: string) =>
     request<{ ok: true }>(`/content/items/${id}`, { method: 'DELETE' }),
+  renameItem: (id: string, name: string) =>
+    request<{ ok: true }>(`/content/items/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  changeItemStatus: (id: string, statusId: string) =>
+    request<{ ok: true }>(`/content/items/${id}/status`, { method: 'PATCH', body: JSON.stringify({ statusId }) }),
+  getAssignmentInfo: (id: string) => request<AssignmentInfo>(`/content/items/${id}/assignment`),
+  setStatusAssignees: (id: string, statusId: string, profileIds: string[]) =>
+    request<{ ok: true }>(`/content/items/${id}/statuses/${statusId}/assignees`, {
+      method: 'PUT',
+      body: JSON.stringify({ profileIds }),
+    }),
   getWorkflow: (projectId: string) =>
     request<WorkflowConfig>(`/projects/${projectId}/workflow`),
   updateStatus: (
@@ -207,11 +273,93 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
+  createStatus: (
+    projectId: string,
+    patch: {
+      name: string;
+      color: string;
+      autoDueDays?: number | null;
+      readOnly?: boolean;
+      reviewingRoleIds?: string[];
+    },
+  ) =>
+    request<{ id: string }>(`/projects/${projectId}/workflow/statuses`, {
+      method: 'POST',
+      body: JSON.stringify(patch),
+    }),
+  deleteStatus: (statusId: string) =>
+    request<{ ok: true }>(`/workflow/statuses/${statusId}`, { method: 'DELETE' }),
   setDefaultAssignees: (statusId: string, profileIds: string[]) =>
     request<{ ok: true }>(`/workflow/statuses/${statusId}/default-assignees`, {
       method: 'PUT',
       body: JSON.stringify({ profileIds }),
     }),
+  createRating: (projectId: string, patch: { name: string; description: string | null; statusId: string }) =>
+    request<{ id: string }>(`/projects/${projectId}/workflow/ratings`, {
+      method: 'POST',
+      body: JSON.stringify(patch),
+    }),
+  updateRating: (
+    ratingId: string,
+    patch: { name?: string; description?: string | null; statusId?: string },
+  ) =>
+    request<{ ok: true }>(`/workflow/ratings/${ratingId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteRating: (ratingId: string) =>
+    request<{ ok: true }>(`/workflow/ratings/${ratingId}`, { method: 'DELETE' }),
+  listProjectTemplates: (projectId: string) =>
+    request<TemplateSummary[]>(`/projects/${projectId}/templates`),
+  getTemplate: (id: string) => request<TemplateDetail>(`/templates/${id}`),
+  createTemplate: (projectId: string, name: string) =>
+    request<{ id: string }>(`/projects/${projectId}/templates`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  duplicateTemplate: (id: string) =>
+    request<{ id: string }>(`/templates/${id}/duplicate`, { method: 'POST' }),
+  cloneTemplateToProject: (id: string, targetProjectId: string) =>
+    request<{ id: string; projectId: string }>(`/templates/${id}/clone`, {
+      method: 'POST',
+      body: JSON.stringify({ targetProjectId }),
+    }),
+  updateTemplate: (id: string, patch: { name?: string; isDefault?: boolean }) =>
+    request<{ ok: true }>(`/templates/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteTemplate: (id: string) => request<{ ok: true }>(`/templates/${id}`, { method: 'DELETE' }),
+  createField: (tabId: string, fieldType: string) =>
+    request<{ id: string }>(`/template-tabs/${tabId}/fields`, {
+      method: 'POST',
+      body: JSON.stringify({ fieldType }),
+    }),
+  updateField: (
+    fieldId: string,
+    patch: {
+      label?: string;
+      isVisible?: boolean;
+      isRequired?: boolean;
+      isPlainText?: boolean;
+      recommendedLength?: number | null;
+      recommendedLengthUnits?: string;
+      guidelines?: string | null;
+      choices?: string[];
+      defaultContent?: string | null;
+    },
+  ) =>
+    request<{ ok: true }>(`/template-fields/${fieldId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  moveField: (fieldId: string, direction: 'up' | 'down') =>
+    request<{ ok: true }>(`/template-fields/${fieldId}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ direction }),
+    }),
+  deleteField: (fieldId: string) =>
+    request<{ ok: true }>(`/template-fields/${fieldId}`, { method: 'DELETE' }),
+  createTab: (templateId: string, name: string) =>
+    request<{ id: string }>(`/templates/${templateId}/tabs`, { method: 'POST', body: JSON.stringify({ name }) }),
+  updateTab: (tabId: string, patch: { name?: string; isHidden?: boolean }) =>
+    request<{ ok: true }>(`/template-tabs/${tabId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteTab: (tabId: string) =>
+    request<{ ok: true }>(`/template-tabs/${tabId}`, { method: 'DELETE' }),
   saveField: (itemId: string, fieldId: string, value: unknown) =>
     request<{ ok: true }>(`/content/items/${itemId}/fields/${fieldId}`, {
       method: 'PUT',

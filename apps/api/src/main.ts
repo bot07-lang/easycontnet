@@ -22,6 +22,11 @@ async function bootstrap() {
   loadEnv();
   const app = await NestFactory.create(AppModule, { cors: false });
 
+  // All API routes live under /api. This keeps them clear of the SPA when the
+  // built frontend is served from this same process (merged deployment), and is
+  // harmless when the API runs standalone.
+  app.setGlobalPrefix('api');
+
   const origins = (process.env.CORS_ORIGINS ?? 'http://localhost:5173')
     .split(',')
     .map((s) => s.trim());

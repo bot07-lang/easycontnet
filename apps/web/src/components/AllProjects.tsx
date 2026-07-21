@@ -232,11 +232,15 @@ function ProjectsSection({
                 <MemberAvatars members={p.members} />
 
                 <div className="ml-auto flex items-center gap-4">
-                  <div className="text-right">
-                    <div className="text-sm text-slate-700">
-                      {p.active_count} active
+                  <div className="flex flex-col items-end">
+                    <div className="flex items-center gap-2">
+                      <Tooltip label="All items in progress">
+                        <span className="text-sm text-slate-700">{p.active_count} active</span>
+                      </Tooltip>
                       {p.overdue_count > 0 && (
-                        <span className="ml-2 font-medium text-red-600">{p.overdue_count} overdue</span>
+                        <Tooltip label="Items past their due date">
+                          <span className="text-sm font-medium text-red-600">{p.overdue_count} overdue</span>
+                        </Tooltip>
                       )}
                     </div>
                     <div className="text-[13px] text-slate-400">{formatActivity(p.last_activity)}</div>
@@ -253,6 +257,26 @@ function ProjectsSection({
 }
 
 // Shared pieces used by both the grid card and the list row.
+
+/**
+ * Dark hover tooltip, matching the reference. The badge labels ("N active",
+ * "My items") are terse, so the tooltip spells out exactly what they count —
+ * definitions taken from EasyContent's own tooltips:
+ *   "N active"  → "All items in progress"       (items not in a terminal status)
+ *   "My items"  → "Items waiting for your action" (assigned to you at the current status)
+ */
+function Tooltip({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <span className="group relative inline-flex">
+      {children}
+      <span role="tooltip"
+            className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-800 px-2.5 py-1.5 text-[12px] font-medium text-white opacity-0 shadow-lg transition-opacity duration-100 group-hover:opacity-100">
+        {label}
+        <span className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-x-4 border-t-4 border-x-transparent border-t-slate-800" />
+      </span>
+    </span>
+  );
+}
 
 function StatusBar({ project }: { project: DashboardProject }) {
   const total = project.status_breakdown.reduce((n, s) => n + s.count, 0);
@@ -272,13 +296,14 @@ function StatusBar({ project }: { project: DashboardProject }) {
 
 function MyItemsBadge({ count }: { count: number }) {
   return (
-    <span title="Items waiting for your action"
-          className="flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600">
-      My items
-      <span className="grid h-4 min-w-4 place-items-center rounded-full bg-slate-200 px-1 text-[11px] font-semibold text-slate-700">
-        {count}
+    <Tooltip label="Items waiting for your action">
+      <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1 text-[12px] text-slate-600">
+        My items
+        <span className="grid h-4 min-w-4 place-items-center rounded-full bg-slate-200 px-1 text-[11px] font-semibold text-slate-700">
+          {count}
+        </span>
       </span>
-    </span>
+    </Tooltip>
   );
 }
 
@@ -496,13 +521,17 @@ function ProjectCard({ project, onOpen }: { project: DashboardProject; onOpen: (
       <div className="mb-3"><StatusBar project={project} /></div>
 
       <div className="mb-3 flex items-center gap-2">
-        <span className="rounded border border-slate-300 px-2.5 py-0.5 text-[13px] text-slate-700">
-          {project.active_count} active
-        </span>
-        {project.overdue_count > 0 && (
-          <span className="rounded border border-red-200 px-2.5 py-0.5 text-[13px] font-medium text-red-600">
-            {project.overdue_count} overdue
+        <Tooltip label="All items in progress">
+          <span className="rounded border border-slate-300 px-2.5 py-0.5 text-[13px] text-slate-700">
+            {project.active_count} active
           </span>
+        </Tooltip>
+        {project.overdue_count > 0 && (
+          <Tooltip label="Items past their due date">
+            <span className="rounded border border-red-200 px-2.5 py-0.5 text-[13px] font-medium text-red-600">
+              {project.overdue_count} overdue
+            </span>
+          </Tooltip>
         )}
       </div>
 

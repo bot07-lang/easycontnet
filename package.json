@@ -3,11 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "engines": { "node": ">=24" },
+  "packageManager": "pnpm@11.7.0",
   "scripts": {
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
     "dev:web": "pnpm --filter @content/web dev",
     "dev:api": "pnpm --filter @content/api dev",
     "build": "pnpm -r build",
+    "build:merged": "pnpm --filter @content/web build",
+    "start:merged": "SERVE_WEB=true pnpm --filter @content/api start",
     "typecheck": "pnpm -r typecheck"
   }
 }
