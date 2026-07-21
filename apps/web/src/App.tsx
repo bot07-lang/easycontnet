@@ -5,6 +5,9 @@ import { useSession } from './lib/session';
 import { DevSwitcher } from './components/DevSwitcher';
 import { ItemEditor } from './components/ItemEditor';
 import { AllProjects } from './components/AllProjects';
+import { ContentItemsTable } from './components/ContentItemsTable';
+import { CreateItemDialog } from './components/CreateItemDialog';
+import { Sidebar, IMPLEMENTED, type NavKey } from './components/Sidebar';
 
 /**
  * Wired app: sign in as a seeded user, pick a project, open an item, edit it.
@@ -49,94 +52,136 @@ function SignedOut() {
 }
 
 function Workspace() {
-  // null projectId = the All Projects dashboard (home).
+  // The sidebar always has a project selected (defaults to the first). `showAll`
+  // toggles the All Projects dashboard vs the selected project's view.
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(true);
+  const [nav, setNav] = useState<NavKey>('content');
   const [itemId, setItemId] = useState<string | null>(null);
 
-  const items = useQuery({
-    queryKey: ['items', projectId],
-    queryFn: () => api.listItems(projectId!),
-    enabled: !!projectId,
-  });
+  const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
 
-  const goHome = () => {
-    setProjectId(null);
+  // Default the dropdown to the first visible project once loaded.
+  if (!projectId && projects.data?.length) setProjectId(projects.data[0]!.id);
+
+  const selectProject = (id: string) => {
+    setProjectId(id);
+    setShowAll(false);
+    setNav('content');
     setItemId(null);
   };
 
-  // The dashboard (home) is full width; a project view has the sidebar.
-  if (!projectId) {
-    return (
-      <div className="mx-auto max-w-[1400px] px-6 py-6">
-        <AllProjects
-          onOpenProject={(id) => { setProjectId(id); setItemId(null); }}
-          onOpenItem={(it) => { /* project id unknown here; open item directly */ setItemId(it.id); }}
-        />
-        {/* Opening a My Item drills straight into the editor without a project sidebar. */}
-        {itemId && (
-          <div className="mt-6">
-            <button type="button" onClick={() => setItemId(null)}
-                    className="mb-3 text-sm text-blue-600 hover:underline">
-              ← Back to all projects
-            </button>
-            <ItemEditor itemId={itemId} />
+  return (
+    <div className="flex h-[calc(100vh-52px)]">
+      <Sidebar
+        selectedProjectId={projectId}
+        activeNav={showAll ? null : nav}
+        onAllProjects={() => { setShowAll(true); setItemId(null); }}
+        onSelectProject={selectProject}
+        onNavigate={(key) => { setShowAll(false); setNav(key); setItemId(null); }}
+      />
+
+      <div className="min-w-0 flex-1 overflow-y-auto bg-slate-100">
+        {showAll || !projectId ? (
+          <div className="mx-auto max-w-[1400px] px-6 py-6">
+            <AllProjects
+              onOpenProject={selectProject}
+              onOpenItem={(it) => { setProjectId(it.project_id); setShowAll(false); setNav('content'); setItemId(it.id); }}
+            />
           </div>
+        ) : (
+          <ProjectView projectId={projectId} nav={nav} itemId={itemId} onOpenItem={setItemId} />
         )}
+      </div>
+    </div>
+  );
+}
+
+function ProjectView({
+  projectId, nav, itemId, onOpenItem,
+}: {
+  projectId: string;
+  nav: NavKey;
+  itemId: string | null;
+  onOpenItem: (id: string | null) => void;
+}) {
+  const items = useQuery({
+    queryKey: ['items', projectId],
+    queryFn: () => api.listItems(projectId),
+    enabled: nav === 'content',
+  });
+
+  if (nav !== 'content' || !IMPLEMENTED[nav]) {
+    return (
+      <div className="grid h-full place-items-center text-slate-400">
+        <p className="text-sm">This section is coming soon.</p>
+      </div>
+    );
+  }
+
+  const empty = items.data?.length === 0;
+
+  // Open item → full editor with a back link. Otherwise the items table (or the
+  // empty state when the project has no content).
+  if (itemId) {
+    return (
+      <div className="h-full overflow-y-auto p-6">
+        <button type="button" onClick={() => onOpenItem(null)}
+                className="mb-3 text-sm text-blue-600 hover:underline">
+          ← Content items
+        </button>
+        <ItemEditor itemId={itemId} />
       </div>
     );
   }
 
   return (
-    <div className="mx-auto flex max-w-[1400px] gap-5 px-6 py-6">
-      {/* Sidebar */}
-      <aside className="w-72 shrink-0 space-y-4">
-        <button
-          type="button"
-          onClick={goHome}
-          className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          ← All projects
-        </button>
+    <div className="h-full p-6">
+      {items.isLoading ? (
+        <p className="text-sm text-slate-400">Loading…</p>
+      ) : empty ? (
+        <EmptyContent projectId={projectId} onCreated={onOpenItem} />
+      ) : (
+        <ContentItemsTable projectId={projectId} onOpenItem={onOpenItem} />
+      )}
+    </div>
+  );
+}
 
-        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <h2 className="border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-[13px] font-bold tracking-wide text-slate-700">
-            CONTENT
-          </h2>
-          {items.isLoading && <p className="px-4 py-3 text-sm text-slate-400">Loading…</p>}
-          {items.error && (
-            <p className="px-4 py-3 text-sm text-red-600">Can’t reach the API.</p>
-          )}
-          {items.data?.length === 0 && (
-            <p className="px-4 py-3 text-sm text-slate-400">No items in this project.</p>
-          )}
-          {items.data?.map((it) => (
-            <button
-              key={it.id}
-              type="button"
-              onClick={() => setItemId(it.id)}
-              className={`flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm transition hover:bg-slate-50 ${
-                it.id === itemId ? 'bg-blue-50 text-blue-700' : 'text-slate-700'
-              }`}
-            >
-              {it.status_color && (
-                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: it.status_color }} />
-              )}
-              <span className="truncate">{it.name}</span>
-            </button>
-          ))}
-        </section>
-      </aside>
+/** Empty-content state with "Add first item" — opens the create dialog. */
+function EmptyContent({
+  projectId, onCreated,
+}: {
+  projectId: string;
+  onCreated: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="grid h-full place-items-center">
+      <div className="max-w-md text-center">
+        <div className="mx-auto mb-6 grid h-28 w-28 place-items-center rounded-full bg-indigo-50">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="1.5">
+            <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+            <path d="M14 3v6h6M8 13h6M8 17h5" />
+          </svg>
+        </div>
+        <h2 className="text-2xl font-semibold text-slate-800">No content in this project yet</h2>
+        <p className="mx-auto mt-3 max-w-sm text-[15px] text-slate-500">
+          A content item usually represents a page, a blog post, or an article. Start by creating
+          one and then assigning it to a user or claiming it yourself.
+        </p>
+        <div className="mt-7">
+          <button type="button" onClick={() => setOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-md bg-slate-100 px-5 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-200">
+            <span className="text-lg leading-none">+</span> Add first item
+          </button>
+        </div>
+      </div>
 
-      {/* Main */}
-      <main className="min-w-0 flex-1">
-        {itemId ? (
-          <ItemEditor itemId={itemId} />
-        ) : (
-          <div className="grid h-64 place-items-center rounded-lg border border-dashed border-slate-300 text-slate-400">
-            Select a content item to open it
-          </div>
-        )}
-      </main>
+      {open && (
+        <CreateItemDialog projectId={projectId} onClose={() => setOpen(false)}
+                          onCreated={(id) => { setOpen(false); onCreated(id); }} />
+      )}
     </div>
   );
 }

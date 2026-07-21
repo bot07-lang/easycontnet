@@ -40,6 +40,10 @@ export interface ItemSummary {
   template_name: string | null;
   status_name: string | null;
   status_color: string | null;
+  is_terminal: boolean;
+  mine: boolean;
+  people: { name: string }[];
+  next_due_date: string | null;
 }
 
 /** Shape returned by GET /content/items/:id — matches the editor's field model. */
@@ -90,6 +94,7 @@ export interface DashboardMyItem {
   id: string;
   item_number: number;
   name: string;
+  project_id: string;
   project_name: string;
   status_name: string | null;
   status_color: string | null;
@@ -125,6 +130,26 @@ export const api = {
   listItems: (projectId: string) =>
     request<ItemSummary[]>(`/content/items?projectId=${encodeURIComponent(projectId)}`),
   getItem: (id: string) => request<ApiItem>(`/content/items/${id}`),
+  listTemplates: (projectId: string) =>
+    request<{ id: string; name: string; is_default: boolean }[]>(
+      `/content/templates?projectId=${encodeURIComponent(projectId)}`,
+    ),
+  createItem: (
+    projectId: string,
+    name: string,
+    templateId: string | null,
+    opts?: { description?: string; keywords?: string[] },
+  ) =>
+    request<{ id: string }>('/content/items', {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId,
+        name,
+        templateId,
+        description: opts?.description ?? null,
+        keywords: opts?.keywords ?? [],
+      }),
+    }),
   saveField: (itemId: string, fieldId: string, value: unknown) =>
     request<{ ok: true }>(`/content/items/${itemId}/fields/${fieldId}`, {
       method: 'PUT',

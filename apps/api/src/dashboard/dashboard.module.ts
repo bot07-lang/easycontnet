@@ -72,7 +72,7 @@ class DashboardController {
 
       const myItems = (
         await c.query(
-          `select ci.id, ci.item_number, ci.name,
+          `select ci.id, ci.item_number, ci.name, ci.project_id,
                   p.name as project_name,
                   s.name as status_name, s.color as status_color
              from public.content_items ci

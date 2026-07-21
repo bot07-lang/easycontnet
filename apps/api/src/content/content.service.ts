@@ -21,13 +21,25 @@ export class ContentService {
       const { rows } = await c.query(
         `select ci.id, ci.item_number, ci.name, ci.updated_at,
                 t.name as template_name,
-                s.name as status_name, s.color as status_color
+                s.name as status_name, s.color as status_color, s.is_terminal,
+                (ci.current_status_id is not null
+                 and exists (select 1 from public.item_status_assignees a
+                             where a.item_id = ci.id and a.status_id = ci.current_status_id
+                               and a.profile_id = $2)) as mine,
+                coalesce((
+                  select jsonb_agg(jsonb_build_object('name', pr.full_name) order by pr.full_name)
+                  from public.item_status_assignees a
+                  join public.profiles pr on pr.id = a.profile_id
+                  where a.item_id = ci.id and a.status_id = ci.current_status_id
+                ), '[]'::jsonb) as people,
+                (select min(a.due_at) from public.item_status_assignees a
+                 where a.item_id = ci.id and a.status_id = ci.current_status_id) as next_due_date
            from public.content_items ci
            left join public.templates t on t.id = ci.template_id
            left join public.workflow_statuses s on s.id = ci.current_status_id
           where ci.project_id = $1
           order by ci.item_number desc`,
-        [projectId],
+        [projectId, user.userId],
       );
       return rows;
     });
@@ -112,6 +124,43 @@ export class ContentService {
       const code = (err as { code?: string }).code;
       if (code === RLS_VIOLATION || code === FK_VIOLATION) {
         throw new ForbiddenException('You cannot edit this item');
+      }
+      throw err;
+    }
+  }
+
+  /** Templates in a project, for the create-item picker. */
+  async listTemplates(user: UserContext, projectId: string) {
+    return this.db.withUser(user, async (c) => {
+      const { rows } = await c.query(
+        `select id, name, is_default from public.templates
+          where project_id = $1 order by is_default desc, name`,
+        [projectId],
+      );
+      return rows;
+    });
+  }
+
+  /** Create a content item with an optional template (null = Blank/minimal). */
+  async createItem(
+    user: UserContext,
+    projectId: string,
+    name: string,
+    templateId: string | null,
+    description: string | null,
+    keywords: string[],
+  ) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const { rows } = await c.query(
+          `select public.api_create_content_item($1, $2, $3, $4, $5::text[]) as id`,
+          [projectId, name, templateId, description, keywords],
+        );
+        return { id: rows[0]?.id as string };
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === RLS_VIOLATION) {
+        throw new ForbiddenException('You cannot create items in this project');
       }
       throw err;
     }
