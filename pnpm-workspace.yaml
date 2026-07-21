@@ -1,0 +1,7 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+# esbuild ships a native binary and needs its install script to run.
+# It is Vite's bundler — an expected, first-party dependency.
+allowBuilds:
+  esbuild: true

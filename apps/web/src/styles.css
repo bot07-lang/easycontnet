@@ -1,0 +1,43 @@
+@import 'tailwindcss';
+
+/* Typography inside the rich-text editor. Tiptap ships no styles of its own —
+   the document is plain semantic HTML, so it is styled here. */
+.prose-editor h1 { font-size: 2rem;    font-weight: 600; margin: 1.4rem 0 .7rem; line-height: 1.2; }
+.prose-editor h2 { font-size: 1.55rem; font-weight: 600; margin: 1.3rem 0 .6rem; line-height: 1.25; }
+.prose-editor h3 { font-size: 1.25rem; font-weight: 600; margin: 1.1rem 0 .5rem; }
+.prose-editor h4 { font-size: 1.1rem;  font-weight: 600; margin: 1rem 0 .5rem; }
+.prose-editor p  { margin: .75rem 0; }
+.prose-editor ul { list-style: disc;    margin: .75rem 0; padding-left: 1.6rem; }
+.prose-editor ol { list-style: decimal; margin: .75rem 0; padding-left: 1.6rem; }
+.prose-editor li { margin: .3rem 0; }
+.prose-editor a  { color: #2563eb; text-decoration: underline; }
+.prose-editor img { max-width: 100%; height: auto; border-radius: .375rem; margin: 1rem 0; }
+.prose-editor blockquote {
+  border-left: 3px solid #cbd5e1; padding-left: 1rem; margin: 1rem 0; color: #475569;
+}
+.prose-editor code {
+  background: #f1f5f9; padding: .1rem .3rem; border-radius: .2rem; font-size: .9em;
+}
+.prose-editor pre {
+  background: #0f172a; color: #e2e8f0; padding: 1rem; border-radius: .5rem;
+  overflow-x: auto; margin: 1rem 0;
+}
+.prose-editor table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+.prose-editor th, .prose-editor td { border: 1px solid #cbd5e1; padding: .5rem .75rem; }
+.prose-editor th { background: #f8fafc; font-weight: 600; }
+
+/* One stable editable height. Focusing slides the toolbar in above without the
+   text area also resizing, so nothing lurches under the cursor. */
+.rt-body .prose-editor { min-height: 92px; }
+
+/* Ghost placeholder text inside an empty editor. The Placeholder extension
+   tags empty nodes with is-empty / is-editor-empty and a data-placeholder
+   attribute; this renders that text without it becoming real content. */
+.prose-editor p.is-editor-empty:first-child::before,
+.prose-editor p.is-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

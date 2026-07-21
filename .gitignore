@@ -1,0 +1,20 @@
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+
+# env — never commit keys
+.env
+.env.*
+!.env.example
+
+# supabase local artifacts
+supabase/.branches/
+supabase/.temp/
+
+# editor / os
+.DS_Store
+*.log
+.idea/
+.vscode/
