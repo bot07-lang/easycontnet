@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Module, UseGuards } from '@nestjs/common';
+import { Controller, Get, Inject, Module, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard, type UserContext } from '../auth/auth.guard.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import { DatabaseService } from '../db/database.service.js';
@@ -19,12 +19,14 @@ class DashboardController {
   constructor(@Inject(DatabaseService) private readonly db: DatabaseService) {}
 
   @Get()
-  get(@CurrentUser() user: UserContext) {
+  get(@CurrentUser() user: UserContext, @Query('archived') archived?: string) {
+    const wantArchived = archived === 'true';
     return this.db.withUser(user, async (c) => {
       const projects = (
         await c.query(
           `select
              p.id, p.project_number, p.name, p.description,
+             (p.archived_at is not null) as archived,
              -- active = items not in a terminal status
              coalesce((
                select count(*) from public.content_items ci
@@ -61,9 +63,10 @@ class DashboardController {
                join public.workflow_statuses s on s.id = b.current_status_id), '[]'::jsonb
              ) as status_breakdown
            from public.projects p
-           where p.archived_at is null
+           where ($2 and p.archived_at is not null)
+              or (not $2 and p.archived_at is null)
            order by p.project_number`,
-          [user.userId],
+          [user.userId, wantArchived],
         )
       ).rows;
 

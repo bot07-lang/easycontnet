@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type DashboardProject, type DashboardMyItem } from '../lib/api';
 import { CreateProjectDialog } from './CreateProjectDialog';
 
@@ -26,7 +26,7 @@ export function AllProjects({
 }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['dashboard'],
-    queryFn: api.getDashboard,
+    queryFn: () => api.getDashboard(),
   });
 
   if (isLoading) return <p className="p-8 text-slate-400">Loading…</p>;
@@ -89,10 +89,20 @@ function ProjectsSection({
   const [sort, setSort] = useState<SortKey>('created');
   const [sortOpen, setSortOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [tab, setTab] = useState<'active' | 'archived'>('active');
+
+  // Archived projects load only when the tab is opened.
+  const archivedQ = useQuery({
+    queryKey: ['dashboard', 'archived'],
+    queryFn: () => api.getDashboard(true).then((d) => d.projects),
+    enabled: tab === 'archived',
+  });
+
+  const source = tab === 'archived' ? (archivedQ.data ?? []) : projects;
 
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = q ? projects.filter((p) => p.name.toLowerCase().includes(q)) : [...projects];
+    const list = q ? source.filter((p) => p.name.toLowerCase().includes(q)) : [...source];
     list.sort((a, b) => {
       switch (sort) {
         case 'name': return a.name.localeCompare(b.name);
@@ -106,7 +116,7 @@ function ProjectsSection({
       }
     });
     return list;
-  }, [projects, search, sort]);
+  }, [source, search, sort]);
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5">
@@ -134,10 +144,14 @@ function ProjectsSection({
 
         {/* Active / Archived */}
         <div className="flex overflow-hidden rounded-md border border-slate-300 text-sm">
-          <button type="button" className="bg-slate-100 px-4 py-2 font-medium text-slate-800">Active</button>
-          <button type="button"
-                  title="Archived projects — coming with archive support"
-                  className="cursor-not-allowed px-4 py-2 text-slate-400">Archived</button>
+          <button type="button" onClick={() => setTab('active')}
+                  className={tab === 'active' ? 'bg-slate-100 px-4 py-2 font-medium text-slate-800' : 'px-4 py-2 text-slate-500'}>
+            Active
+          </button>
+          <button type="button" onClick={() => setTab('archived')}
+                  className={tab === 'archived' ? 'bg-slate-100 px-4 py-2 font-medium text-slate-800' : 'px-4 py-2 text-slate-500'}>
+            Archived
+          </button>
         </div>
 
         {/* View toggle */}
@@ -185,8 +199,12 @@ function ProjectsSection({
         />
       )}
 
-      {shown.length === 0 ? (
-        <p className="py-8 text-center text-sm text-slate-400">No projects match.</p>
+      {tab === 'archived' && archivedQ.isLoading ? (
+        <p className="py-8 text-center text-sm text-slate-400">Loading…</p>
+      ) : shown.length === 0 ? (
+        <p className="py-8 text-center text-sm text-slate-400">
+          {tab === 'archived' ? 'No archived projects.' : 'No projects match.'}
+        </p>
       ) : view === 'grid' ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {shown.map((p) => (
@@ -223,7 +241,7 @@ function ProjectsSection({
                     </div>
                     <div className="text-[13px] text-slate-400">{formatActivity(p.last_activity)}</div>
                   </div>
-                  <CardActions />
+                  <CardActions project={p} />
                 </div>
               </div>
             </li>
@@ -284,23 +302,179 @@ function MemberAvatars({ members }: { members: { name: string }[] }) {
   );
 }
 
-function CardActions() {
+function CardActions({ project }: { project: DashboardProject }) {
+  const qc = useQueryClient();
   const stop = (e: React.MouseEvent) => e.stopPropagation();
+  const [open, setOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  // Refresh both the active and archived lists — a project can move between them.
+  const refresh = () => qc.invalidateQueries({ queryKey: ['dashboard'] });
+  const archive = useMutation({ mutationFn: () => api.archiveProject(project.id), onSuccess: refresh });
+  const restore = useMutation({ mutationFn: () => api.restoreProject(project.id), onSuccess: refresh });
+  const duplicate = useMutation({ mutationFn: () => api.duplicateProject(project.id), onSuccess: refresh });
+  const del = useMutation({
+    mutationFn: () => api.deleteProject(project.id),
+    onSuccess: () => { setConfirmDelete(false); refresh(); },
+  });
+
+  const Item = ({ label, danger, onClick }: { label: string; danger?: boolean; onClick: () => void }) => (
+    <button type="button"
+            onClick={(e) => { stop(e); onClick(); setOpen(false); }}
+            className={`block w-full px-4 py-2 text-left text-sm hover:bg-slate-100 ${danger ? 'text-red-600' : 'text-slate-700'}`}>
+      {label}
+    </button>
+  );
+
   return (
-    <div className="flex items-center gap-1 text-slate-400">
+    <div ref={ref} className="relative flex items-center gap-1 text-slate-400">
       <button type="button" onClick={stop} title="Bookmark this project"
               className="grid h-7 w-7 place-items-center rounded hover:bg-slate-100 hover:text-slate-600">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
           <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
         </svg>
       </button>
-      <button type="button" onClick={stop} title="Project options"
+      <button type="button" onClick={(e) => { stop(e); setOpen((v) => !v); }} title="Project options"
               className="grid h-7 w-7 place-items-center rounded hover:bg-slate-100 hover:text-slate-600">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" />
         </svg>
       </button>
+
+      {open && (
+        <div className="absolute right-0 top-8 z-20 w-40 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-xl">
+          <Item label="Settings" onClick={() => setRenaming(true)} />
+          <Item label="Duplicate" onClick={() => duplicate.mutate()} />
+          {project.archived ? (
+            <Item label="Restore" onClick={() => restore.mutate()} />
+          ) : (
+            <Item label="Archive" onClick={() => archive.mutate()} />
+          )}
+          <div className="my-1 border-t border-slate-100" />
+          <Item label="Delete" danger onClick={() => setConfirmDelete(true)} />
+        </div>
+      )}
+
+      {renaming && (
+        <RenameDialog project={project} onClose={() => setRenaming(false)}
+                      onDone={() => { setRenaming(false); refresh(); }} />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete project?"
+          message={`“${project.name}” and all its content will be permanently deleted. This cannot be undone.`}
+          confirmLabel={del.isPending ? 'Deleting…' : 'Delete'}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => del.mutate()}
+        />
+      )}
     </div>
+  );
+}
+
+function RenameDialog({
+  project, onClose, onDone,
+}: {
+  project: DashboardProject;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [name, setName] = useState(project.name);
+  const rename = useMutation({
+    mutationFn: () => api.renameProject(project.id, name.trim()),
+    onSuccess: onDone,
+  });
+  return (
+    <Dialog title="Project settings" onClose={onClose}
+      footer={
+        <>
+          <BtnGhost onClick={onClose}>Cancel</BtnGhost>
+          <BtnPrimary disabled={!name.trim() || rename.isPending} onClick={() => rename.mutate()}>
+            {rename.isPending ? 'Saving…' : 'Save'}
+          </BtnPrimary>
+        </>
+      }>
+      <label className="block">
+        <span className="mb-1.5 block text-sm font-medium text-slate-700">Project name</span>
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)}
+               className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-[15px]
+                          focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100" />
+      </label>
+    </Dialog>
+  );
+}
+
+function ConfirmDialog({
+  title, message, confirmLabel, onCancel, onConfirm,
+}: {
+  title: string; message: string; confirmLabel: string;
+  onCancel: () => void; onConfirm: () => void;
+}) {
+  return (
+    <Dialog title={title} onClose={onCancel}
+      footer={
+        <>
+          <BtnGhost onClick={onCancel}>Cancel</BtnGhost>
+          <button type="button" onClick={onConfirm}
+                  className="rounded-md bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-700">
+            {confirmLabel}
+          </button>
+        </>
+      }>
+      <p className="text-[15px] text-slate-600">{message}</p>
+    </Dialog>
+  );
+}
+
+function Dialog({
+  title, onClose, children, footer,
+}: {
+  title: string; onClose: () => void; children: React.ReactNode; footer: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/40 p-4"
+         onMouseDown={onClose} onClick={(e) => e.stopPropagation()}>
+      <div onMouseDown={(e) => e.stopPropagation()} className="w-[460px] max-w-full rounded-lg bg-white shadow-2xl">
+        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <h2 className="text-[18px] font-semibold text-slate-900">{title}</h2>
+          <button type="button" onClick={onClose} aria-label="Close"
+                  className="grid h-8 w-8 place-items-center rounded text-slate-500 hover:bg-slate-100">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </header>
+        <div className="px-6 py-5">{children}</div>
+        <footer className="flex justify-end gap-2 border-t border-slate-200 px-6 py-4">{footer}</footer>
+      </div>
+    </div>
+  );
+}
+
+function BtnGhost({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onClick}
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+      {children}
+    </button>
+  );
+}
+function BtnPrimary({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled}
+            className="rounded-md bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40">
+      {children}
+    </button>
   );
 }
 
@@ -316,7 +490,7 @@ function ProjectCard({ project, onOpen }: { project: DashboardProject; onOpen: (
     >
       <div className="mb-4 flex items-start justify-between gap-2">
         <h3 className="text-[16px] font-semibold text-slate-900">{project.name}</h3>
-        <CardActions />
+        <CardActions project={project} />
       </div>
 
       <div className="mb-3"><StatusBar project={project} /></div>

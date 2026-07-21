@@ -2,9 +2,12 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   Module,
+  Param,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -52,6 +55,71 @@ class ProjectsController {
         [name, body.memberIds ?? [], JSON.stringify(DEFAULT_WORKFLOW)],
       );
       return { id: rows[0]?.id as string };
+    });
+  }
+
+  /** Rename (Settings). RLS's update policy re-checks manage_projects. */
+  @Patch(':id')
+  @RequirePermission('manage_projects')
+  async rename(
+    @CurrentUser() user: UserContext,
+    @Param('id') id: string,
+    @Body() body: { name?: string },
+  ) {
+    const name = body?.name?.trim();
+    if (!name) throw new BadRequestException('Name is required');
+    return this.db.withUser(user, async (c) => {
+      const { rowCount } = await c.query(
+        `update public.projects set name = $2 where id = $1`,
+        [id, name],
+      );
+      if (!rowCount) throw new BadRequestException('Project not found');
+      return { ok: true };
+    });
+  }
+
+  /** Archive (reversible — keeps all data). */
+  @Post(':id/archive')
+  @RequirePermission('manage_projects')
+  archive(@CurrentUser() user: UserContext, @Param('id') id: string) {
+    return this.setArchived(user, id, true);
+  }
+
+  @Post(':id/restore')
+  @RequirePermission('manage_projects')
+  restore(@CurrentUser() user: UserContext, @Param('id') id: string) {
+    return this.setArchived(user, id, false);
+  }
+
+  /** Delete — irreversible. */
+  @Delete(':id')
+  @RequirePermission('manage_projects')
+  remove(@CurrentUser() user: UserContext, @Param('id') id: string) {
+    return this.db.withUser(user, async (c) => {
+      const { rowCount } = await c.query(`delete from public.projects where id = $1`, [id]);
+      if (!rowCount) throw new BadRequestException('Project not found');
+      return { ok: true };
+    });
+  }
+
+  /** Duplicate structure into a new "(copy)" project. */
+  @Post(':id/duplicate')
+  @RequirePermission('manage_projects')
+  duplicate(@CurrentUser() user: UserContext, @Param('id') id: string) {
+    return this.db.withUser(user, async (c) => {
+      const { rows } = await c.query(`select public.api_duplicate_project($1) as id`, [id]);
+      return { id: rows[0]?.id as string };
+    });
+  }
+
+  private setArchived(user: UserContext, id: string, archived: boolean) {
+    return this.db.withUser(user, async (c) => {
+      const { rowCount } = await c.query(
+        `update public.projects set archived_at = ${archived ? 'now()' : 'null'} where id = $1`,
+        [id],
+      );
+      if (!rowCount) throw new BadRequestException('Project not found');
+      return { ok: true };
     });
   }
 }

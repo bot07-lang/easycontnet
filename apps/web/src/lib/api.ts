@@ -78,6 +78,7 @@ export interface DashboardProject {
   project_number: number;
   name: string;
   description: string | null;
+  archived: boolean;
   active_count: number;
   overdue_count: number;
   last_activity: string | null;
@@ -105,7 +106,8 @@ export interface OrgUser {
 }
 
 export const api = {
-  getDashboard: () => request<Dashboard>('/dashboard'),
+  getDashboard: (archived = false) =>
+    request<Dashboard>(`/dashboard${archived ? '?archived=true' : ''}`),
   listProjects: () => request<ProjectSummary[]>('/projects'),
   listUsers: () => request<OrgUser[]>('/users'),
   createProject: (name: string, memberIds: string[]) =>
@@ -113,6 +115,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ name, memberIds }),
     }),
+  renameProject: (id: string, name: string) =>
+    request<{ ok: true }>(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  archiveProject: (id: string) => request<{ ok: true }>(`/projects/${id}/archive`, { method: 'POST' }),
+  restoreProject: (id: string) => request<{ ok: true }>(`/projects/${id}/restore`, { method: 'POST' }),
+  deleteProject: (id: string) => request<{ ok: true }>(`/projects/${id}`, { method: 'DELETE' }),
+  duplicateProject: (id: string) =>
+    request<{ id: string }>(`/projects/${id}/duplicate`, { method: 'POST' }),
   listItems: (projectId: string) =>
     request<ItemSummary[]>(`/content/items?projectId=${encodeURIComponent(projectId)}`),
   getItem: (id: string) => request<ApiItem>(`/content/items/${id}`),
