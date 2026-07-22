@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './lib/api';
 import { useSession } from './lib/session';
@@ -30,10 +30,19 @@ export default function App() {
   const qc = useQueryClient();
 
   // Different users see different data under RLS. Clearing the cache on a user
-  // switch avoids briefly showing the previous user's projects while the new
-  // user's data refetches.
+  // *switch* avoids briefly showing the previous user's projects while the new
+  // user's data refetches. Crucially we do NOT clear on the initial sign-in
+  // (undefined -> id): there is no prior user's data to hide, and clearing then
+  // races the first queries — wiping their results and forcing a wasteful,
+  // sometimes very slow, second fetch round.
   const userId = session?.user?.id;
-  useEffect(() => { qc.clear(); }, [userId, qc]);
+  const prevUserId = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (prevUserId.current !== undefined && prevUserId.current !== userId) {
+      qc.clear();
+    }
+    prevUserId.current = userId;
+  }, [userId, qc]);
 
   return (
     <div className="min-h-screen bg-slate-100">
