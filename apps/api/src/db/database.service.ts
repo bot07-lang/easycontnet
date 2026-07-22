@@ -24,7 +24,9 @@ export class DatabaseService implements OnModuleDestroy {
     if (!connectionString) throw new Error('DATABASE_URL is not set');
     this.pool = new Pool({
       connectionString,
-      max: 10,
+      // Serverless (Vercel) sets DB_POOL_MAX=1 with the transaction pooler (6543);
+      // a long-lived server (Railway) leaves it at 10 with the session pooler.
+      max: Number(process.env.DB_POOL_MAX ?? 10),
       ssl: { rejectUnauthorized: false },
     });
   }

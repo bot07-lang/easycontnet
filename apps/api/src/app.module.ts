@@ -13,12 +13,13 @@ import { TemplatesModule } from './templates/templates.module.js';
 // React SPA (apps/web/dist), so one service hosts both. Left off in local dev,
 // where Vite serves the frontend on its own port. The path resolves the same
 // from src (dev) and dist (prod) — both sit one level under apps/api.
-const webDist = fileURLToPath(new URL('../../web/dist', import.meta.url));
+// import.meta.url is only evaluated when actually serving static (Railway/merged),
+// never in the Vercel serverless bundle where SERVE_WEB is unset.
 const staticImports =
   process.env.SERVE_WEB === 'true'
     ? [
         ServeStaticModule.forRoot({
-          rootPath: webDist,
+          rootPath: fileURLToPath(new URL('../../web/dist', import.meta.url)),
           // Never let the SPA fallback swallow API routes.
           exclude: ['/api/{*path}'],
         }),
