@@ -42,6 +42,9 @@ export function AddFilesDialog({
   const [inserting, setInserting] = useState(false);
   const [query, setQuery] = useState('');
   const [linkFilter, setLinkFilter] = useState<LinkFilter>('all');
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [viewUrl, setViewUrl] = useState<string | null>(null);
+  const [confirmFile, setConfirmFile] = useState<LibraryFile | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const keyRef = useRef(0);
   const stagedRef = useRef<Staged[]>([]);
@@ -120,6 +123,45 @@ export function AddFilesDialog({
     }
   };
 
+  const download = (f: LibraryFile) => {
+    setMenuId(null);
+    if (!f.url) return;
+    const a = document.createElement('a');
+    a.href = f.url;
+    a.download = f.name;
+    a.target = '_blank';
+    a.click();
+  };
+
+  const doDelete = async () => {
+    const f = confirmFile;
+    if (!f) return;
+    setConfirmFile(null);
+    setLibSelected((prev) => { const n = new Map(prev); n.delete(f.id); return n; });
+    try {
+      await api.deleteFile(f.id);
+      qc.invalidateQueries({ queryKey: ['files', projectId] });
+      qc.invalidateQueries({ queryKey: ['file-folders', projectId] });
+      toast('File deleted.');
+    } catch {
+      toast('Could not delete the file.');
+    }
+  };
+
+  const moveToFolder = async (f: LibraryFile) => {
+    setMenuId(null);
+    const dest = window.prompt('Move to folder (leave blank to clear):', f.folder ?? '');
+    if (dest === null) return;
+    try {
+      await api.moveFile(f.id, dest.trim() || null);
+      qc.invalidateQueries({ queryKey: ['files', projectId] });
+      qc.invalidateQueries({ queryKey: ['file-folders', projectId] });
+      toast('File moved.');
+    } catch {
+      toast('Could not move the file.');
+    }
+  };
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (library.data ?? []).filter((f) => {
@@ -139,7 +181,8 @@ export function AddFilesDialog({
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/40 p-6" onMouseDown={closeGuard}>
-      <div onMouseDown={(e) => e.stopPropagation()} className="flex h-[600px] w-[960px] max-w-full flex-col rounded-lg bg-white shadow-2xl">
+      <div onMouseDown={(e) => { e.stopPropagation(); setMenuId(null); }}
+           className="flex h-[600px] w-[960px] max-w-full flex-col rounded-lg bg-white shadow-2xl">
         <header className="flex items-center gap-6 border-b border-slate-200 px-6 pt-4">
           {(['library', 'upload'] as const).map((t) => (
             <button key={t} type="button" onClick={() => setTab(t)}
@@ -194,11 +237,23 @@ export function AddFilesDialog({
                   </div>
                 </div>
               ) : !filtered.length ? (
-                <p className="py-10 text-center text-sm text-slate-400">No files match your search.</p>
+                <p className="py-10 text-center text-sm text-slate-400">No files match your criteria</p>
               ) : (
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
                   {filtered.map((f) => (
-                    <FileTile key={f.id} file={f} selected={libSelected.has(f.id)} already={already.has(f.id)} onClick={() => toggleLib(f)} />
+                    <FileTile
+                      key={f.id}
+                      file={f}
+                      selected={libSelected.has(f.id)}
+                      already={already.has(f.id)}
+                      menuOpen={menuId === f.id}
+                      onToggle={() => toggleLib(f)}
+                      onMenu={() => setMenuId((cur) => (cur === f.id ? null : f.id))}
+                      onView={() => { setMenuId(null); if (f.url) setViewUrl(f.url); }}
+                      onDownload={() => download(f)}
+                      onMove={() => moveToFolder(f)}
+                      onDelete={() => { setMenuId(null); setConfirmFile(f); }}
+                    />
                   ))}
                 </div>
               )}
@@ -274,41 +329,167 @@ export function AddFilesDialog({
           </div>
         </footer>
       </div>
+
+      {confirmFile && (
+        <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-900/50 p-6" onMouseDown={(e) => { e.stopPropagation(); setConfirmFile(null); }}>
+          <div onMouseDown={(e) => e.stopPropagation()} className="w-[560px] max-w-full rounded-lg bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <h2 className="min-w-0 text-[22px] font-semibold text-slate-900">
+                Delete <span className="break-all">“{confirmFile.name}”</span>?
+              </h2>
+              <button type="button" onClick={() => setConfirmFile(null)}
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded text-slate-500 hover:bg-slate-100">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <p className="mt-4 text-[15px] leading-relaxed text-slate-600">
+              You are going to permanently delete the selected files from the File &amp; Media library. This{' '}
+              <strong className="font-semibold text-slate-800">cannot</strong> be undone. The deleted files will also
+              disappear from all content items they are attached to.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setConfirmFile(null)}
+                      className="rounded-md bg-slate-100 px-6 py-2.5 text-sm font-semibold uppercase tracking-wide text-slate-700 hover:bg-slate-200">
+                Cancel
+              </button>
+              <button type="button" onClick={doDelete}
+                      className="rounded-md bg-red-500 px-6 py-2.5 text-sm font-semibold uppercase tracking-wide text-white hover:bg-red-600">
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewUrl && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-900/80 p-8" onMouseDown={(e) => { e.stopPropagation(); setViewUrl(null); }}>
+          <img src={viewUrl} alt="" className="max-h-full max-w-full rounded shadow-2xl" onMouseDown={(e) => e.stopPropagation()} />
+          <button type="button" onClick={() => setViewUrl(null)}
+                  className="absolute right-6 top-6 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function FileTile({ file, selected, already, onClick }: { file: LibraryFile; selected: boolean; already: boolean; onClick: () => void }) {
+function FileTile({
+  file, selected, already, menuOpen, onToggle, onMenu, onView, onDownload, onMove, onDelete,
+}: {
+  file: LibraryFile;
+  selected: boolean;
+  already: boolean;
+  menuOpen: boolean;
+  onToggle: () => void;
+  onMenu: () => void;
+  onView: () => void;
+  onDownload: () => void;
+  onMove: () => void;
+  onDelete: () => void;
+}) {
   const isImage = (file.mime ?? '').startsWith('image/') && file.url;
+  const badge = ext(file.name).toUpperCase();
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+
   return (
-    <button type="button" onClick={onClick}
-            className={`group relative overflow-hidden rounded-md border text-left transition ${
-              selected ? 'border-blue-500 ring-2 ring-blue-200' : 'border-slate-200 hover:border-slate-300'
-            }`}>
-      <div className="grid h-[120px] place-items-center bg-slate-100">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onToggle}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
+      className={`relative flex cursor-pointer flex-col overflow-hidden rounded-md border bg-white text-left transition ${
+        selected ? 'border-blue-500 ring-2 ring-blue-200' : 'border-slate-200 hover:border-slate-300'
+      }`}
+    >
+      <div className="relative h-[150px] shrink-0 bg-slate-100">
+        {/* select checkbox */}
+        <span className={`absolute left-2 top-2 z-10 grid h-6 w-6 place-items-center rounded border ${
+          selected ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'
+        }`}>
+          {selected && <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" /></svg>}
+        </span>
+
+        {/* actions menu */}
+        <button type="button" onMouseDown={stop} onClick={(e) => { stop(e); onMenu(); }}
+                className="absolute right-2 top-2 z-10 grid h-7 w-7 place-items-center rounded bg-white/85 text-slate-600 shadow hover:bg-white">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" /></svg>
+        </button>
+        {menuOpen && (
+          <div onMouseDown={stop} onClick={stop} className="absolute right-2 top-10 z-20 w-40 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+            <MenuItem label="View" disabled={!file.url} onClick={onView}>
+              <circle cx="11" cy="11" r="6" /><path d="m20 20-3.5-3.5" />
+            </MenuItem>
+            <MenuItem label="Download" disabled={!file.url} onClick={onDownload}>
+              <path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14" />
+            </MenuItem>
+            <MenuItem label="Move" onClick={onMove}>
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            </MenuItem>
+            <div className="my-1 border-t border-slate-100" />
+            <MenuItem label="Delete" danger onClick={onDelete}>
+              <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M10 11v6M14 11v6" />
+            </MenuItem>
+          </div>
+        )}
+
         {isImage
           ? <img src={file.url!} alt={file.name} className="h-full w-full object-cover" />
-          : <span className="text-[11px] font-semibold uppercase text-slate-400">{ext(file.name)}</span>}
+          : <span className="grid h-full place-items-center text-[12px] font-semibold uppercase text-slate-400">{badge}</span>}
       </div>
-      <div className="px-2 py-1.5">
-        <p className="truncate text-[12px] font-medium text-slate-700" title={file.name}>{file.name}</p>
-        <p className="text-[11px] text-slate-400">{formatSize(file.sizeBytes)}{already ? ' · added' : ''}</p>
-        {file.linkedItems.length > 0 && (
-          <p className="mt-1 flex items-center gap-1 text-[11px] text-blue-600" title={file.linkedItems.map((i) => i.name).join(', ')}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
-              <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" />
-            </svg>
-            <span className="truncate">
-              {file.linkedItems[0]!.name}{file.linkedItems.length > 1 ? ` +${file.linkedItems.length - 1}` : ''}
-            </span>
+
+      <div className="flex flex-col gap-1 p-3">
+        <p className="truncate text-[13px] font-medium text-slate-800" title={file.name}>{file.name}</p>
+        {file.createdAt && <p className="text-[12px] text-slate-500">Uploaded {timeAgo(file.createdAt)}</p>}
+        {file.uploadedBy && (
+          <p className="text-[12px] text-slate-500">
+            by <span className="font-medium text-slate-600">{file.uploadedBy}</span>
+            {file.uploadedByRole ? ` (${file.uploadedByRole})` : ''}
           </p>
         )}
+        <p className="mt-1 flex items-center gap-2">
+          <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">{badge}</span>
+          <span className="text-[12px] text-slate-500">{formatSize(file.sizeBytes)}{already ? ' · added' : ''}</span>
+        </p>
+        <div className="mt-2 border-t border-slate-100 pt-2">
+          {file.linkedItems.length > 0 ? (
+            <p className="flex items-center gap-1.5 text-[12px] text-blue-600" title={file.linkedItems.map((i) => i.name).join(', ')}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
+                <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" />
+              </svg>
+              <span className="truncate">{linkedLabel(file.linkedItems)}</span>
+            </p>
+          ) : (
+            <p className="text-[12px] text-slate-400">Not linked to a content item</p>
+          )}
+        </div>
       </div>
-      {selected && (
-        <span className="absolute right-1.5 top-1.5 grid h-5 w-5 place-items-center rounded-full bg-blue-600 text-white">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" /></svg>
-        </span>
-      )}
+    </div>
+  );
+}
+
+function MenuItem({
+  label, onClick, disabled, danger, children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[14px] transition ${
+        disabled ? 'cursor-not-allowed text-slate-300' : danger ? 'text-red-600 hover:bg-red-50' : 'text-slate-700 hover:bg-slate-50'
+      }`}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        {children}
+      </svg>
+      {label}
     </button>
   );
 }
@@ -323,9 +504,24 @@ function CloudArt() {
   );
 }
 
-function ext(name: string) {
-  const m = name.match(/\.(\w+)$/);
-  return m ? m[1] : 'file';
+function linkedLabel(items: { name: string }[]): string {
+  if (items.length === 1) return items[0]!.name;
+  return `Linked to ${items.length} items`;
+}
+
+function timeAgo(iso: string): string {
+  const secs = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  const mins = Math.floor(secs / 60);
+  const hrs = Math.floor(mins / 60);
+  const days = Math.floor(hrs / 24);
+  if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
+  if (hrs > 0) return `${hrs} hour${hrs > 1 ? 's' : ''} ago`;
+  if (mins > 0) return `${mins} minute${mins > 1 ? 's' : ''} ago`;
+  return 'just now';
+}
+
+function ext(name: string): string {
+  return name.match(/\.(\w+)$/)?.[1] ?? 'file';
 }
 export function formatSize(bytes: number | null) {
   if (bytes == null) return '';
