@@ -178,7 +178,7 @@ function ProjectView({
           ← Content items
         </button>
         <Suspense fallback={<LazyFallback />}>
-          <ItemEditor itemId={itemId} />
+          <ItemEditor itemId={itemId} projectId={projectId} />
         </Suspense>
       </div>
     );

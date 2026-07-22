@@ -8,6 +8,7 @@ import { ProjectsModule } from './projects/projects.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
 import { WorkflowModule } from './workflow/workflow.module.js';
 import { TemplatesModule } from './templates/templates.module.js';
+import { FilesModule } from './files/files.module.js';
 
 // Merged deployment: when SERVE_WEB=true, this process also serves the built
 // React SPA (apps/web/dist), so one service hosts both. Left off in local dev,
@@ -30,7 +31,7 @@ const staticImports =
   imports: [
     ...staticImports,
     DatabaseModule, AccessModule, ContentModule, ProjectsModule,
-    DashboardModule, WorkflowModule, TemplatesModule,
+    DashboardModule, WorkflowModule, TemplatesModule, FilesModule,
   ],
 })
 export class AppModule {}

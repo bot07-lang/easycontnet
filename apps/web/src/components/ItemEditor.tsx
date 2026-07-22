@@ -12,7 +12,7 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'error';
  * each field a short beat after you stop typing. A failed save (e.g. RLS says
  * you can't edit) surfaces rather than silently dropping the change.
  */
-export function ItemEditor({ itemId }: { itemId: string }) {
+export function ItemEditor({ itemId, projectId }: { itemId: string; projectId?: string }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['item', itemId],
     queryFn: () => api.getItem(itemId),
@@ -23,10 +23,10 @@ export function ItemEditor({ itemId }: { itemId: string }) {
   if (isLoading) return <div className="p-8 text-slate-400">Loading…</div>;
   if (error) return <div className="p-8 text-red-600">{String(error)}</div>;
   if (!data) return null;
-  return <Loaded key={nonce} item={data} onReload={() => setNonce((n) => n + 1)} />;
+  return <Loaded key={nonce} item={data} projectId={projectId} onReload={() => setNonce((n) => n + 1)} />;
 }
 
-function Loaded({ item, onReload }: { item: ApiItem; onReload: () => void }) {
+function Loaded({ item, projectId, onReload }: { item: ApiItem; projectId?: string; onReload: () => void }) {
   const [activeTab, setActiveTab] = useState(item.tabs[0]?.id ?? '');
   const [values, setValues] = useState<Record<string, unknown>>(() =>
     Object.fromEntries(item.tabs.flatMap((t) => t.fields).map((f) => [f.id, f.value])),
@@ -123,11 +123,11 @@ function Loaded({ item, onReload }: { item: ApiItem; onReload: () => void }) {
             <Field
               key={f.id}
               field={field}
-              files={[]}
               onChange={onChange}
               activeFieldId={activeFieldId}
               onActivate={setActiveFieldId}
               docTitle={item.name}
+              projectId={projectId}
             />
           );
         })}

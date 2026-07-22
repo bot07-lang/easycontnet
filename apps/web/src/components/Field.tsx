@@ -1,6 +1,10 @@
-import type { ContentField, UploadedFile } from '../mock/article';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import type { ContentField } from '../mock/article';
+import { api, type LibraryFile, type StoredFile } from '../lib/api';
 import { FieldCounter } from './FieldCounter';
 import { RichTextField } from './RichTextField';
+import { AddFilesDialog, formatSize } from './AddFilesDialog';
 
 /** Flip on when Phase 2 delivers comments. */
 const SHOW_COMMENT_BADGES = false;
@@ -83,38 +87,52 @@ function FieldShell({
   );
 }
 
-function FilesField({ files }: { files: UploadedFile[] }) {
-  /**
-   * Downloads every attached file. The mock has no real URLs, so it writes a
-   * manifest instead — enough to prove the button works end to end. Once
-   * uploads exist this fetches the files and zips them.
-   */
-  const downloadAll = () => {
-    const manifest = [
-      'Attached files',
-      '='.repeat(40),
-      '',
-      ...files.map(
-        (f) => `${f.name}\n  ${f.format} · ${f.sizeKb}Kb\n  Uploaded ${f.uploadedAt} by ${f.uploadedBy} (${f.uploaderRole})\n`,
-      ),
-      `${files.length} file${files.length === 1 ? '' : 's'}, ${files.reduce((n, f) => n + f.sizeKb, 0)}Kb total`,
-    ].join('\n');
+function FilesField({
+  projectId, value, onChange,
+}: {
+  projectId?: string;
+  value: StoredFile[];
+  onChange: (files: StoredFile[]) => void;
+}) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [viewUrl, setViewUrl] = useState<string | null>(null);
 
-    const url = URL.createObjectURL(new Blob([manifest], { type: 'text/plain' }));
+  // The library gives fresh signed URLs + uploader info; the field only stores
+  // stable references, so we join by id at render time (URLs would go stale).
+  const library = useQuery({
+    queryKey: ['files', projectId],
+    queryFn: () => api.listFiles(projectId!),
+    enabled: !!projectId,
+  });
+  const byId = useMemo(() => {
+    const m = new Map<string, LibraryFile>();
+    (library.data ?? []).forEach((f) => m.set(f.id, f));
+    return m;
+  }, [library.data]);
+
+  const remove = (id: string) => onChange(value.filter((f) => f.id !== id));
+
+  const download = (name: string, url?: string | null) => {
+    if (!url) return;
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'attached-files.txt';
+    a.download = name;
+    a.target = '_blank';
     a.click();
-    URL.revokeObjectURL(url);
   };
+
+  const downloadAll = () => value.forEach((f) => download(f.name, byId.get(f.id)?.url));
 
   return (
     <div className="px-5 py-5">
       <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-4">
         <button
           type="button"
+          onClick={() => projectId && setDialogOpen(true)}
+          disabled={!projectId}
           className="grid min-h-[190px] place-items-center rounded border-2 border-dashed
-                     border-slate-300 text-slate-500 transition hover:border-slate-400 hover:text-slate-700"
+                     border-slate-300 text-slate-500 transition hover:border-slate-400 hover:text-slate-700
+                     disabled:cursor-not-allowed disabled:opacity-50"
         >
           <span className="text-center">
             <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="mx-auto block">
@@ -124,32 +142,58 @@ function FilesField({ files }: { files: UploadedFile[] }) {
           </span>
         </button>
 
-        {files.map((f) => (
-          <figure key={f.id} className="overflow-hidden rounded border border-slate-200">
-            <div className="grid h-[130px] place-items-center bg-slate-100 text-xs text-slate-400">
-              {f.format}
-            </div>
-            <figcaption className="p-3">
-              <p className="truncate text-[13px] font-medium text-slate-800" title={f.name}>
-                {f.name}
-              </p>
-              <p className="mt-1 text-[12px] text-slate-500">Uploaded {f.uploadedAt}</p>
-              <p className="text-[12px] text-slate-500">
-                by <span className="font-medium text-slate-600">{f.uploadedBy}</span> ({f.uploaderRole})
-              </p>
-              <p className="mt-2 flex items-center gap-2">
-                <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                  {f.format}
-                </span>
-                <span className="text-[12px] text-slate-500">{f.sizeKb}Kb</span>
-              </p>
-            </figcaption>
-          </figure>
-        ))}
+        {value.map((f) => {
+          const lib = byId.get(f.id);
+          const url = lib?.url;
+          const isImage = (f.mime ?? '').startsWith('image/') && url;
+          const ext = f.name.match(/\.(\w+)$/)?.[1] ?? f.mime?.split('/')[1] ?? 'file';
+          return (
+            <figure key={f.id} title={tooltipFor(f, lib)}
+                    className="flex flex-col overflow-hidden rounded border border-slate-200 bg-white">
+              <div className="relative h-[150px] shrink-0 bg-slate-100">
+                {/* Constant action toolbar over the image, matching the reference. */}
+                <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between p-1.5">
+                  <div className="flex gap-1">
+                    <CardBtn title="Comment — coming in Phase 2" disabled>
+                      <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
+                      <path d="M12 8v5M9.5 10.5h5" />
+                    </CardBtn>
+                    <CardBtn title="View" disabled={!url} onClick={() => url && setViewUrl(url)}>
+                      <circle cx="11" cy="11" r="6" /><path d="m20 20-3.5-3.5M11 8.5v5M8.5 11h5" />
+                    </CardBtn>
+                    <CardBtn title="Download" disabled={!url} onClick={() => download(f.name, url)}>
+                      <path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14" />
+                    </CardBtn>
+                  </div>
+                  <CardBtn title="Remove" danger onClick={() => remove(f.id)}>
+                    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M10 11v6M14 11v6" />
+                  </CardBtn>
+                </div>
+                {isImage
+                  ? <img src={url!} alt={f.name} className="absolute inset-0 h-full w-full object-contain p-2" />
+                  : <span className="grid h-full place-items-center text-sm font-semibold uppercase text-slate-400">{ext}</span>}
+              </div>
+              <figcaption className="border-t border-slate-100 bg-white p-3">
+                <p className="truncate text-[13px] font-medium text-slate-800" title={f.name}>{f.name}</p>
+                {lib?.createdAt && <p className="mt-1 text-[12px] text-slate-500">Uploaded {timeAgo(lib.createdAt)}</p>}
+                {lib?.uploadedBy && (
+                  <p className="text-[12px] text-slate-500">
+                    by <span className="font-medium text-slate-600">{lib.uploadedBy}</span>
+                    {lib.uploadedByRole ? ` (${lib.uploadedByRole})` : ''}
+                  </p>
+                )}
+                <p className="mt-2 flex items-center gap-2">
+                  <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">{ext}</span>
+                  <span className="text-[12px] text-slate-500">{formatSize(f.sizeBytes)}</span>
+                </p>
+              </figcaption>
+            </figure>
+          );
+        })}
       </div>
 
       {/* Download-all only appears once there are files, matching the reference. */}
-      {files.length > 0 && (
+      {value.length > 0 && (
         <div className="mt-5 flex justify-center">
           <button
             type="button"
@@ -168,20 +212,81 @@ function FilesField({ files }: { files: UploadedFile[] }) {
           </button>
         </div>
       )}
+
+      {dialogOpen && projectId && (
+        <AddFilesDialog
+          projectId={projectId}
+          existingIds={value.map((f) => f.id)}
+          onInsert={(picked) => {
+            // Append only files not already attached.
+            const have = new Set(value.map((f) => f.id));
+            onChange([...value, ...picked.filter((p) => !have.has(p.id))]);
+          }}
+          onClose={() => setDialogOpen(false)}
+        />
+      )}
+
+      {viewUrl && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-slate-900/80 p-8" onClick={() => setViewUrl(null)}>
+          <img src={viewUrl} alt="" className="max-h-full max-w-full rounded shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          <button type="button" onClick={() => setViewUrl(null)}
+                  className="absolute right-6 top-6 grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
+/** A small translucent action button overlaid on a file card's image. */
+function CardBtn({
+  title, onClick, disabled, danger, children,
+}: {
+  title: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={`grid h-7 w-7 place-items-center rounded bg-white/85 shadow transition ${
+        disabled ? 'cursor-not-allowed text-slate-300' : danger ? 'text-red-500 hover:bg-white' : 'text-slate-600 hover:bg-white hover:text-slate-900'
+      }`}
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        {children}
+      </svg>
+    </button>
+  );
+}
+
+/** Rich hover tooltip for a file card. */
+function tooltipFor(f: StoredFile, lib?: LibraryFile): string {
+  const parts = [f.name];
+  if (lib?.uploadedBy) parts.push(`by ${lib.uploadedBy}${lib.uploadedByRole ? ` (${lib.uploadedByRole})` : ''}`);
+  const when = lib?.createdAt ? new Date(lib.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '';
+  parts.push(`Uploaded ${when} — ${formatSize(f.sizeBytes)}`);
+  return parts.join('\n');
+}
+
 export function Field({
-  field, files, onChange, activeFieldId, onActivate, docTitle,
+  field, onChange, activeFieldId, onActivate, docTitle, projectId,
 }: {
   field: ContentField;
-  files: UploadedFile[];
   onChange: (id: string, value: unknown) => void;
   activeFieldId: string | null;
   onActivate: (id: string) => void;
   /** Item name — used as the print/preview document title in the editor. */
   docTitle?: string;
+  /** Project the item belongs to — needed by the file field's library. */
+  projectId?: string;
 }) {
   // Section fields hold no value and get no chrome.
   if (field.type === 'heading') {
@@ -201,9 +306,10 @@ export function Field({
   const set = (v: unknown) => onChange(field.id, v);
 
   if (field.type === 'file_image_upload') {
+    const stored = Array.isArray(field.value) ? (field.value as StoredFile[]) : [];
     return (
       <FieldShell field={field} value={null}>
-        <FilesField files={files} />
+        <FilesField projectId={projectId} value={stored} onChange={(files) => set(files)} />
       </FieldShell>
     );
   }
@@ -369,4 +475,16 @@ export function Field({
       />
     </FieldShell>
   );
+}
+
+/** Human "Uploaded 3 minutes ago" style relative time. */
+function timeAgo(iso: string): string {
+  const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (secs < 60) return `${secs} second${secs === 1 ? '' : 's'} ago`;
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
 }

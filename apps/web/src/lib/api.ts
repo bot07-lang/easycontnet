@@ -398,4 +398,48 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ value }),
     }),
+
+  /* ---- project file library ---- */
+  listFiles: (projectId: string) =>
+    request<LibraryFile[]>(`/files?projectId=${encodeURIComponent(projectId)}`),
+  listFileFolders: (projectId: string) =>
+    request<string[]>(`/files/folders?projectId=${encodeURIComponent(projectId)}`),
+  createUploadUrl: (projectId: string, name: string) =>
+    request<{ path: string; token: string; signedUrl: string }>(`/files/upload-url`, {
+      method: 'POST',
+      body: JSON.stringify({ projectId, name }),
+    }),
+  recordFile: (input: {
+    projectId: string; path: string; name: string;
+    mime?: string | null; size?: number | null; folder?: string | null;
+  }) => request<LibraryFile>(`/files`, { method: 'POST', body: JSON.stringify(input) }),
+  moveFile: (id: string, folder: string | null) =>
+    request<{ ok: true }>(`/files/${id}`, { method: 'PATCH', body: JSON.stringify({ folder }) }),
+  deleteFile: (id: string) => request<{ ok: true }>(`/files/${id}`, { method: 'DELETE' }),
 };
+
+/** A file in a project's library, as returned by the API (url is short-lived). */
+export interface LibraryFile {
+  id: string;
+  name: string;
+  mime: string | null;
+  sizeBytes: number | null;
+  folder: string | null;
+  uploadedBy: string | null;
+  uploadedByRole: string | null;
+  linkedItems: { id: string; name: string }[];
+  createdAt: string;
+  url: string | null;
+}
+
+/**
+ * What a file/image field stores: a stable reference into the library plus
+ * enough to render even if the fresh signed URL can't be resolved. The live
+ * download URL is looked up from the library query at render time, never saved.
+ */
+export interface StoredFile {
+  id: string;
+  name: string;
+  mime: string | null;
+  sizeBytes: number | null;
+}
