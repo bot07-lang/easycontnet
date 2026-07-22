@@ -22,5 +22,3 @@ supabase/.temp/
 # TypeScript incremental build info
 *.tsbuildinfo
 
-# Generated Vercel serverless bundle
-/api/index.js
