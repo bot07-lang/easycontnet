@@ -125,12 +125,7 @@ export function AddFilesDialog({
 
   const download = (f: LibraryFile) => {
     setMenuId(null);
-    if (!f.url) return;
-    const a = document.createElement('a');
-    a.href = f.url;
-    a.download = f.name;
-    a.target = '_blank';
-    a.click();
+    if (f.url) downloadFile(f.url, f.name);
   };
 
   const doDelete = async () => {
@@ -423,7 +418,7 @@ function FileTile({
             <MenuItem label="Download" disabled={!file.url} onClick={onDownload}>
               <path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14" />
             </MenuItem>
-            <MenuItem label="Move" onClick={onMove}>
+            <MenuItem label="Move" disabled onClick={onMove}>
               <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
             </MenuItem>
             <div className="my-1 border-t border-slate-100" />
@@ -523,6 +518,23 @@ function timeAgo(iso: string): string {
 function ext(name: string): string {
   return name.match(/\.(\w+)$/)?.[1] ?? 'file';
 }
+/**
+ * Force a browser download of a private file. The bytes live on Supabase's
+ * origin, so the anchor `download` attribute is ignored cross-origin; instead we
+ * append `download=<name>`, which makes Supabase serve the object with
+ * `Content-Disposition: attachment` (correct filename, no in-memory blob). The
+ * token is already present in the signed URL — this adds no new exposure.
+ */
+export function downloadFile(url: string, name: string) {
+  const href = url + (url.includes('?') ? '&' : '?') + 'download=' + encodeURIComponent(name);
+  const a = document.createElement('a');
+  a.href = href;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 export function formatSize(bytes: number | null) {
   if (bytes == null) return '';
   if (bytes < 1024) return `${bytes} B`;

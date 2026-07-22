@@ -4,7 +4,7 @@ import type { ContentField } from '../mock/article';
 import { api, type LibraryFile, type StoredFile } from '../lib/api';
 import { FieldCounter } from './FieldCounter';
 import { RichTextField } from './RichTextField';
-import { AddFilesDialog, formatSize } from './AddFilesDialog';
+import { AddFilesDialog, downloadFile, formatSize } from './AddFilesDialog';
 
 /** Flip on when Phase 2 delivers comments. */
 const SHOW_COMMENT_BADGES = false;
@@ -113,12 +113,7 @@ function FilesField({
   const remove = (id: string) => onChange(value.filter((f) => f.id !== id));
 
   const download = (name: string, url?: string | null) => {
-    if (!url) return;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = name;
-    a.target = '_blank';
-    a.click();
+    if (url) downloadFile(url, name);
   };
 
   const downloadAll = () => value.forEach((f) => download(f.name, byId.get(f.id)?.url));
