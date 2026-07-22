@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './lib/api';
 import { useSession } from './lib/session';
+import { Toaster } from './lib/toast';
 import { DevSwitcher } from './components/DevSwitcher';
 import { AllProjects } from './components/AllProjects';
 import { ContentItemsTable } from './components/ContentItemsTable';
@@ -46,6 +47,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-100">
+      <Toaster />
       <header className="flex items-center gap-4 bg-indigo-700 px-6 py-3 text-white">
         <span className="font-semibold tracking-tight">Content Workflow</span>
         <div className="ml-auto">
