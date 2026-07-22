@@ -29,6 +29,14 @@ export class DatabaseService implements OnModuleDestroy {
       max: Number(process.env.DB_POOL_MAX ?? 10),
       ssl: { rejectUnauthorized: false },
     });
+    // The pooler drops idle connections; pg surfaces that as an 'error' event on
+    // the idle client. Without a listener it's an unhandled error that crashes
+    // the process. Log and move on — the pool discards the dead client and opens
+    // a fresh one on the next query.
+    this.pool.on('error', (err) => {
+      // eslint-disable-next-line no-console
+      console.error('[db] idle client error (recovered):', err.message);
+    });
   }
 
   async onModuleDestroy() {
