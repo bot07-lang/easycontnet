@@ -1,16 +1,24 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './lib/api';
 import { useSession } from './lib/session';
 import { DevSwitcher } from './components/DevSwitcher';
-import { ItemEditor } from './components/ItemEditor';
 import { AllProjects } from './components/AllProjects';
 import { ContentItemsTable } from './components/ContentItemsTable';
 import { CreateItemDialog } from './components/CreateItemDialog';
-import { WorkflowSettings } from './components/WorkflowSettings';
-import { TemplatesGrid } from './components/TemplatesGrid';
-import { TemplateBuilder } from './components/TemplateBuilder';
 import { Sidebar, IMPLEMENTED, type NavKey } from './components/Sidebar';
+
+// Heavy pages not shown on first load are code-split into their own chunks —
+// ItemEditor pulls in TipTap (the biggest dependency), so it stays out of the
+// initial bundle. They load on demand behind the Suspense fallback below.
+const ItemEditor = lazy(() => import('./components/ItemEditor').then((m) => ({ default: m.ItemEditor })));
+const WorkflowSettings = lazy(() => import('./components/WorkflowSettings').then((m) => ({ default: m.WorkflowSettings })));
+const TemplatesGrid = lazy(() => import('./components/TemplatesGrid').then((m) => ({ default: m.TemplatesGrid })));
+const TemplateBuilder = lazy(() => import('./components/TemplateBuilder').then((m) => ({ default: m.TemplateBuilder })));
+
+function LazyFallback() {
+  return <p className="p-8 text-sm text-slate-400">Loading…</p>;
+}
 
 /**
  * Wired app: sign in as a seeded user, pick a project, open an item, edit it.
@@ -129,7 +137,9 @@ function ProjectView({
   if (nav === 'workflow') {
     return (
       <div className="h-full overflow-y-auto p-6">
-        <WorkflowSettings projectId={projectId} />
+        <Suspense fallback={<LazyFallback />}>
+          <WorkflowSettings projectId={projectId} />
+        </Suspense>
       </div>
     );
   }
@@ -137,11 +147,13 @@ function ProjectView({
   if (nav === 'templates') {
     return (
       <div className="h-full overflow-y-auto p-6">
-        {openTemplateId ? (
-          <TemplateBuilder templateId={openTemplateId} onBack={() => setOpenTemplateId(null)} />
-        ) : (
-          <TemplatesGrid projectId={projectId} onOpenTemplate={setOpenTemplateId} />
-        )}
+        <Suspense fallback={<LazyFallback />}>
+          {openTemplateId ? (
+            <TemplateBuilder templateId={openTemplateId} onBack={() => setOpenTemplateId(null)} />
+          ) : (
+            <TemplatesGrid projectId={projectId} onOpenTemplate={setOpenTemplateId} />
+          )}
+        </Suspense>
       </div>
     );
   }
@@ -165,7 +177,9 @@ function ProjectView({
                 className="mb-3 text-sm text-blue-600 hover:underline">
           ← Content items
         </button>
-        <ItemEditor itemId={itemId} />
+        <Suspense fallback={<LazyFallback />}>
+          <ItemEditor itemId={itemId} />
+        </Suspense>
       </div>
     );
   }
