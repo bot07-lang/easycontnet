@@ -96,6 +96,40 @@ export class ContentController {
     return this.content.changeStatus(user, id, body.statusId);
   }
 
+  /* ---- versions ---- */
+
+  @Get('items/:id/versions')
+  listVersions(@CurrentUser() user: UserContext, @Param('id') id: string) {
+    return this.content.listVersions(user, id);
+  }
+
+  @Post('items/:id/versions')
+  saveVersion(@CurrentUser() user: UserContext, @Param('id') id: string, @Body() body: { label?: string }) {
+    return this.content.saveVersion(user, id, 'manual', body?.label?.trim() || null);
+  }
+
+  @Get('versions/:versionId')
+  getVersion(@CurrentUser() user: UserContext, @Param('versionId') versionId: string) {
+    return this.content.getVersion(user, versionId);
+  }
+
+  @Patch('versions/:versionId')
+  renameVersion(@CurrentUser() user: UserContext, @Param('versionId') versionId: string, @Body() body: { label?: string }) {
+    if (!body?.label?.trim()) throw new BadRequestException('label is required');
+    return this.content.renameVersion(user, versionId, body.label);
+  }
+
+  /** Restore a version. manage_content_items — it overwrites every field value. */
+  @Post('items/:id/versions/:versionId/restore')
+  @RequirePermission('manage_content_items')
+  restoreVersion(
+    @CurrentUser() user: UserContext,
+    @Param('id') id: string,
+    @Param('versionId') versionId: string,
+  ) {
+    return this.content.restoreVersion(user, id, versionId);
+  }
+
   /** Data for the assign-people panel: statuses (+reviewing roles +assignees) and members. */
   @Get('items/:id/assignment')
   getAssignment(@CurrentUser() user: UserContext, @Param('id') id: string) {

@@ -47,7 +47,10 @@ function FieldShell({
             <CommentBadge count={field.commentCount} />
           ) : null}
         </h3>
-        <FieldCounter field={field} value={value} />
+        {/* Word/character counts only make sense for text fields. */}
+        {(field.type === 'single_line_text' || field.type === 'paragraph_text') && (
+          <FieldCounter field={field} value={value} />
+        )}
       </header>
 
       {children}
@@ -114,7 +117,9 @@ function FilesField({ files }: { files: UploadedFile[] }) {
                      border-slate-300 text-slate-500 transition hover:border-slate-400 hover:text-slate-700"
         >
           <span className="text-center">
-            <span className="block text-3xl leading-none">+</span>
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="mx-auto block">
+              <circle cx="12" cy="12" r="10" /><path d="M12 8v8M8 12h8" />
+            </svg>
             <span className="mt-2 block text-sm">Add files</span>
           </span>
         </button>
@@ -143,25 +148,26 @@ function FilesField({ files }: { files: UploadedFile[] }) {
         ))}
       </div>
 
-      <div className="mt-5 flex justify-center">
-        <button
-          type="button"
-          onClick={downloadAll}
-          disabled={files.length === 0}
-          className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white
-                     px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition
-                     hover:border-slate-400 hover:bg-slate-50 active:bg-slate-100
-                     disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <path d="M7 10l5 5 5-5" />
-            <path d="M12 15V3" />
-          </svg>
-          Download all files
-        </button>
-      </div>
+      {/* Download-all only appears once there are files, matching the reference. */}
+      {files.length > 0 && (
+        <div className="mt-5 flex justify-center">
+          <button
+            type="button"
+            onClick={downloadAll}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white
+                       px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition
+                       hover:border-slate-400 hover:bg-slate-50 active:bg-slate-100"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="M7 10l5 5 5-5" />
+              <path d="M12 15V3" />
+            </svg>
+            Download all files
+          </button>
+        </div>
+      )}
     </div>
   );
 }

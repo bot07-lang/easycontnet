@@ -230,6 +230,8 @@ export class ContentService {
           [itemId, statusId],
         );
         if (!rowCount) throw new ForbiddenException('You cannot change this item');
+        // A status change auto-creates a version, per the reference.
+        await this.snapshot(c, user, itemId, 'status_change', null);
         return { ok: true as const };
       });
     } catch (err) {
@@ -298,6 +300,132 @@ export class ContentService {
       if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot assign people to this item');
       throw err;
     }
+  }
+
+  /* ------------------------------------------------------------- versions */
+
+  /** List an item's saved versions (newest first). */
+  async listVersions(user: UserContext, itemId: string) {
+    return this.db.withUser(user, async (c) => {
+      const { rows } = await c.query(
+        `select v.id, v.kind, v.label, v.item_name, v.status_name, v.created_at,
+                pr.full_name as created_by_name, ro.name as created_by_role,
+                ws.color as status_color
+           from public.content_item_versions v
+           left join public.profiles pr on pr.id = v.created_by
+           left join public.roles ro on ro.id = pr.role_id
+           left join public.content_items ci on ci.id = v.item_id
+           left join public.workflow_statuses ws on ws.name = v.status_name and ws.project_id = ci.project_id
+          where v.item_id = $1
+          order by v.created_at desc`,
+        [itemId],
+      );
+      return rows;
+    });
+  }
+
+  /** Snapshot the item's current field values into a version. */
+  async saveVersion(user: UserContext, itemId: string, kind: 'manual' | 'status_change', label?: string | null) {
+    return this.db.withUser(user, (c) => this.snapshot(c, user, itemId, kind, label ?? null));
+  }
+
+  /** The stored snapshot for one version (field_id → value), plus its metadata. */
+  async getVersion(user: UserContext, versionId: string) {
+    return this.db.withUser(user, async (c) => {
+      const { rows } = await c.query(
+        `select id, item_id, kind, label, item_name, status_name, snapshot, created_at
+           from public.content_item_versions where id = $1`,
+        [versionId],
+      );
+      if (!rows[0]) throw new NotFoundException('Version not found');
+      return rows[0];
+    });
+  }
+
+  /** Rename a version (manage its label). */
+  async renameVersion(user: UserContext, versionId: string, label: string) {
+    return this.db.withUser(user, async (c) => {
+      const { rowCount } = await c.query(
+        `update public.content_item_versions set label = $2 where id = $1`,
+        [versionId, label.trim() || null],
+      );
+      if (!rowCount) throw new NotFoundException('Version not found');
+      return { ok: true as const };
+    });
+  }
+
+  /**
+   * Restore a version: first snapshot the current state as a backup, then write
+   * the version's field values back onto the item. manage_content_items lets the
+   * field-value writes pass the four-gate edit rule for every field.
+   */
+  async restoreVersion(user: UserContext, itemId: string, versionId: string) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const v = (
+          await c.query(`select snapshot from public.content_item_versions where id = $1 and item_id = $2`, [
+            versionId,
+            itemId,
+          ])
+        ).rows[0];
+        if (!v) throw new NotFoundException('Version not found');
+
+        // Back up the current state before overwriting it.
+        await this.snapshot(c, user, itemId, 'manual', 'Backup before restore');
+
+        // Write the version's values back (only for fields that still exist).
+        await c.query(
+          `insert into public.content_field_values (item_id, field_id, org_id, value)
+           select $1, (s.key)::uuid, $2, s.value
+             from jsonb_each($3::jsonb) as s
+            where exists (select 1 from public.template_fields f where f.id = (s.key)::uuid)
+           on conflict (item_id, field_id)
+           do update set value = excluded.value, updated_at = now()`,
+          [itemId, user.orgId, JSON.stringify(v.snapshot)],
+        );
+        return { ok: true as const };
+      });
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot restore this item');
+      throw err;
+    }
+  }
+
+  /** Shared snapshot helper — captures current field values + item/status name. */
+  private async snapshot(
+    c: PoolClient,
+    user: UserContext,
+    itemId: string,
+    kind: 'manual' | 'status_change',
+    label: string | null,
+  ) {
+    const meta = (
+      await c.query(
+        `select ci.name, s.name as status_name
+           from public.content_items ci
+           left join public.workflow_statuses s on s.id = ci.current_status_id
+          where ci.id = $1`,
+        [itemId],
+      )
+    ).rows[0];
+    if (!meta) throw new NotFoundException('Item not found');
+
+    const snap = (
+      await c.query(
+        `select coalesce(jsonb_object_agg(field_id, value), '{}'::jsonb) as snapshot
+           from public.content_field_values where item_id = $1`,
+        [itemId],
+      )
+    ).rows[0].snapshot;
+
+    const { rows } = await c.query(
+      `insert into public.content_item_versions
+         (org_id, item_id, kind, label, item_name, status_name, snapshot, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+      [user.orgId, itemId, kind, label, meta.name, meta.status_name, snap, user.userId],
+    );
+    return { id: rows[0].id as string };
   }
 
   private async loadItem(c: PoolClient, itemId: string) {

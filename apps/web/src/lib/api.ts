@@ -165,6 +165,28 @@ export interface AssignmentInfo {
   members: { id: string; name: string; role_id: string }[];
 }
 
+export interface ItemVersion {
+  id: string;
+  kind: 'manual' | 'status_change' | 'auto';
+  label: string | null;
+  item_name: string;
+  status_name: string | null;
+  status_color: string | null;
+  created_at: string;
+  created_by_name: string | null;
+  created_by_role: string | null;
+}
+export interface VersionDetail {
+  id: string;
+  item_id: string;
+  kind: string;
+  label: string | null;
+  item_name: string;
+  status_name: string | null;
+  snapshot: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface TemplateSummary {
   id: string;
   name: string;
@@ -251,6 +273,17 @@ export const api = {
     request<{ ok: true }>(`/content/items/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   changeItemStatus: (id: string, statusId: string) =>
     request<{ ok: true }>(`/content/items/${id}/status`, { method: 'PATCH', body: JSON.stringify({ statusId }) }),
+  listVersions: (id: string) => request<ItemVersion[]>(`/content/items/${id}/versions`),
+  saveVersion: (id: string, label?: string) =>
+    request<{ id: string }>(`/content/items/${id}/versions`, {
+      method: 'POST',
+      body: JSON.stringify({ label: label ?? null }),
+    }),
+  getVersion: (versionId: string) => request<VersionDetail>(`/content/versions/${versionId}`),
+  renameVersion: (versionId: string, label: string) =>
+    request<{ ok: true }>(`/content/versions/${versionId}`, { method: 'PATCH', body: JSON.stringify({ label }) }),
+  restoreVersion: (id: string, versionId: string) =>
+    request<{ ok: true }>(`/content/items/${id}/versions/${versionId}/restore`, { method: 'POST' }),
   getAssignmentInfo: (id: string) => request<AssignmentInfo>(`/content/items/${id}/assignment`),
   setStatusAssignees: (id: string, statusId: string, profileIds: string[]) =>
     request<{ ok: true }>(`/content/items/${id}/statuses/${statusId}/assignees`, {
