@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './lib/api';
 import { useSession } from './lib/session';
 import { DevSwitcher } from './components/DevSwitcher';
@@ -19,6 +19,13 @@ import { Sidebar, IMPLEMENTED, type NavKey } from './components/Sidebar';
  */
 export default function App() {
   const { session, loading } = useSession();
+  const qc = useQueryClient();
+
+  // Different users see different data under RLS. Clearing the cache on a user
+  // switch avoids briefly showing the previous user's projects while the new
+  // user's data refetches.
+  const userId = session?.user?.id;
+  useEffect(() => { qc.clear(); }, [userId, qc]);
 
   return (
     <div className="min-h-screen bg-slate-100">

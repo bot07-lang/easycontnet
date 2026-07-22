@@ -2,7 +2,6 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import type { Request, Response } from 'express';
 import { AppModule } from './app.module.js';
-import { AllExceptionsFilter } from './all-exceptions.filter.js';
 
 /**
  * Vercel serverless entrypoint. Unlike main.ts (which calls app.listen() for a
@@ -20,7 +19,6 @@ async function getApp(): Promise<ExpressInstance> {
   if (cached) return cached;
   const app = await NestFactory.create(AppModule, { logger: ['error', 'warn'] });
   app.setGlobalPrefix('api');
-  app.useGlobalFilters(new AllExceptionsFilter()); // TEMP: surface real 500 errors
   const origins = (process.env.CORS_ORIGINS ?? '*').split(',').map((s) => s.trim());
   app.enableCors({ origin: origins.includes('*') ? true : origins, credentials: true });
   await app.init();

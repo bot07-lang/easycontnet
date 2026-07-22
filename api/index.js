@@ -1977,9 +1977,9 @@ var require_catch_decorator = __commonJS({
   "../../node_modules/.pnpm/@nestjs+common@11.1.28_reflect-metadata@0.2.2_rxjs@7.8.2/node_modules/@nestjs/common/decorators/core/catch.decorator.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.Catch = Catch2;
+    exports2.Catch = Catch;
     var constants_1 = require_constants2();
-    function Catch2(...exceptions) {
+    function Catch(...exceptions) {
       return (target) => {
         Reflect.defineMetadata(constants_1.CATCH_WATERMARK, true, target);
         Reflect.defineMetadata(constants_1.FILTER_CATCH_EXCEPTIONS, exceptions, target);
@@ -2970,7 +2970,7 @@ var require_http_exception = __commonJS({
     exports2.HttpException = void 0;
     var shared_utils_1 = require_shared_utils();
     var intrinsic_exception_1 = require_intrinsic_exception();
-    var HttpException2 = class extends intrinsic_exception_1.IntrinsicException {
+    var HttpException = class extends intrinsic_exception_1.IntrinsicException {
       /**
        * Instantiate a plain HTTP Exception.
        *
@@ -3079,7 +3079,7 @@ var require_http_exception = __commonJS({
         };
       }
     };
-    exports2.HttpException = HttpException2;
+    exports2.HttpException = HttpException;
   }
 });
 
@@ -96881,34 +96881,12 @@ AppModule = __decorateClass([
   })
 ], AppModule);
 
-// src/all-exceptions.filter.ts
-var import_common20 = __toESM(require_common(), 1);
-var AllExceptionsFilter = class {
-  catch(exception, host) {
-    const res = host.switchToHttp().getResponse();
-    if (exception instanceof import_common20.HttpException) {
-      return res.status(exception.getStatus()).json(exception.getResponse());
-    }
-    const err = exception;
-    return res.status(500).json({
-      diag: true,
-      name: err?.name ?? "Error",
-      message: err?.message ?? String(exception),
-      code: err?.code
-    });
-  }
-};
-AllExceptionsFilter = __decorateClass([
-  (0, import_common20.Catch)()
-], AllExceptionsFilter);
-
 // src/vercel.ts
 var cached = null;
 async function getApp() {
   if (cached) return cached;
   const app = await import_core2.NestFactory.create(AppModule, { logger: ["error", "warn"] });
   app.setGlobalPrefix("api");
-  app.useGlobalFilters(new AllExceptionsFilter());
   const origins = (process.env.CORS_ORIGINS ?? "*").split(",").map((s) => s.trim());
   app.enableCors({ origin: origins.includes("*") ? true : origins, credentials: true });
   await app.init();
