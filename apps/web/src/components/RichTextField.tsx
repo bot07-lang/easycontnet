@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -15,6 +16,17 @@ const SizedImage = Image.extend({
     };
   },
 });
+
+// The Link mark carries href/target/rel by default; add `title` so the
+// Insert/Edit Link dialog's Title field round-trips.
+const TitledLink = Link.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      title: { default: null },
+    };
+  },
+});
 import TextAlign from '@tiptap/extension-text-align';
 import TextStyle from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
@@ -25,6 +37,10 @@ import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import Youtube from '@tiptap/extension-youtube';
 import Placeholder from '@tiptap/extension-placeholder';
+import Superscript from '@tiptap/extension-superscript';
+import Subscript from '@tiptap/extension-subscript';
+import FontFamily from '@tiptap/extension-font-family';
+import { FontSize, LineHeight, Div, Indent } from './editor-extensions';
 import { EditorToolbar } from './EditorToolbar';
 
 /**
@@ -39,6 +55,7 @@ export function RichTextField({
   placeholder,
   active,
   onActivate,
+  docTitle,
 }: {
   value: string;
   onChange: (html: string) => void;
@@ -47,12 +64,19 @@ export function RichTextField({
   active: boolean;
   /** Called when the field gains focus, to claim the toolbar. */
   onActivate: () => void;
+  /** Item name — printed/previewed as the document title. */
+  docTitle?: string;
 }) {
+  // Fullscreen is an editor-only overlay (the field fills the viewport), not
+  // the browser's native fullscreen — matching the reference's behaviour.
+  const [fullscreen, setFullscreen] = useState(false);
+
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] } }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3, 4, 5, 6] } }),
+      Div,
       Underline,
-      Link.configure({ openOnClick: false, HTMLAttributes: { rel: 'noopener' } }),
+      TitledLink.configure({ openOnClick: false, HTMLAttributes: { rel: 'noopener' } }),
       SizedImage,
       // showOnlyCurrent:false so empty fields show the placeholder even when
       // not focused — otherwise an untouched field looks blank.
@@ -63,6 +87,12 @@ export function RichTextField({
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
       TextStyle,
       Color,
+      FontFamily.configure({ types: ['textStyle'] }),
+      FontSize,
+      LineHeight,
+      Indent,
+      Superscript,
+      Subscript,
       Highlight.configure({ multicolor: true }),
       Table.configure({ resizable: true }),
       TableRow,
@@ -82,6 +112,14 @@ export function RichTextField({
     },
   });
 
+  // Esc leaves fullscreen.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFullscreen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [fullscreen]);
+
   if (!editor) return <div className="h-64 animate-pulse bg-slate-50" />;
 
   // Toolbar is always visible on rich fields. Focus-based show/hide proved
@@ -92,9 +130,14 @@ export function RichTextField({
   void active;
   void onActivate;
   return (
-    <div>
-      <EditorToolbar editor={editor} />
-      <div className="rt-body">
+    <div className={fullscreen ? 'fixed inset-0 z-[60] flex flex-col bg-white' : ''}>
+      <EditorToolbar
+        editor={editor}
+        docTitle={docTitle}
+        fullscreen={fullscreen}
+        onToggleFullscreen={() => setFullscreen((v) => !v)}
+      />
+      <div className={`rt-body ${fullscreen ? 'flex-1 overflow-y-auto' : ''}`}>
         <EditorContent editor={editor} />
       </div>
     </div>

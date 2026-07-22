@@ -6,6 +6,8 @@
 .prose-editor h2 { font-size: 1.55rem; font-weight: 600; margin: 1.3rem 0 .6rem; line-height: 1.25; }
 .prose-editor h3 { font-size: 1.25rem; font-weight: 600; margin: 1.1rem 0 .5rem; }
 .prose-editor h4 { font-size: 1.1rem;  font-weight: 600; margin: 1rem 0 .5rem; }
+.prose-editor h5 { font-size: 1rem;    font-weight: 600; margin: 1rem 0 .5rem; }
+.prose-editor h6 { font-size: .9rem;   font-weight: 600; margin: 1rem 0 .5rem; color: #475569; }
 .prose-editor p  { margin: .75rem 0; }
 .prose-editor ul { list-style: disc;    margin: .75rem 0; padding-left: 1.6rem; }
 .prose-editor ol { list-style: decimal; margin: .75rem 0; padding-left: 1.6rem; }
@@ -41,3 +43,54 @@
   height: 0;
   pointer-events: none;
 }
+
+/* View › Visual aids (on by default). Turning it off hides the table-cell
+   guide borders so a borderless table reads as borderless while editing. */
+.prose-editor.va-off th,
+.prose-editor.va-off td { border-color: transparent; }
+
+/* View › Show blocks — outline each block node and tag it with its element
+   name in the corner, mirroring the reference's "show blocks" overlay. */
+.prose-editor.show-blocks p,
+.prose-editor.show-blocks h1,
+.prose-editor.show-blocks h2,
+.prose-editor.show-blocks h3,
+.prose-editor.show-blocks h4,
+.prose-editor.show-blocks blockquote,
+.prose-editor.show-blocks ul,
+.prose-editor.show-blocks ol,
+.prose-editor.show-blocks pre {
+  outline: 1px dashed #cbd5e1;
+  outline-offset: 3px;
+  position: relative;
+}
+.prose-editor.show-blocks p::before,
+.prose-editor.show-blocks h1::before,
+.prose-editor.show-blocks h2::before,
+.prose-editor.show-blocks h3::before,
+.prose-editor.show-blocks h4::before,
+.prose-editor.show-blocks blockquote::before,
+.prose-editor.show-blocks ul::before,
+.prose-editor.show-blocks ol::before,
+.prose-editor.show-blocks pre::before {
+  position: absolute;
+  top: -0.55rem;
+  left: 0;
+  padding: 0 3px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: .03em;
+  color: #94a3b8;
+  background: #fff;
+  pointer-events: none;
+}
+.prose-editor.show-blocks p::before          { content: 'p'; }
+.prose-editor.show-blocks h1::before         { content: 'h1'; }
+.prose-editor.show-blocks h2::before         { content: 'h2'; }
+.prose-editor.show-blocks h3::before         { content: 'h3'; }
+.prose-editor.show-blocks h4::before         { content: 'h4'; }
+.prose-editor.show-blocks blockquote::before { content: 'blockquote'; }
+.prose-editor.show-blocks ul::before         { content: 'ul'; }
+.prose-editor.show-blocks ol::before         { content: 'ol'; }
+.prose-editor.show-blocks pre::before        { content: 'pre'; }

@@ -51,13 +51,18 @@ export function TableMenu({ editor }: { editor: Editor }) {
     </div>
   );
 
-  /** A leaf action inside a submenu. */
-  const Action = ({ label, onClick }: { label: string; onClick: () => void }) => (
+  /** A leaf action inside a submenu. Disabled entries mirror the reference's
+   *  greyed items (properties dialogs, row/column clipboard) that Tiptap's
+   *  table extension doesn't provide commands for. */
+  const Action = ({ label, onClick, disabled }: { label: string; onClick?: () => void; disabled?: boolean }) => (
     <button
       type="button"
+      disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      className="block w-full px-3 py-2 text-left text-[14px] text-slate-700 hover:bg-slate-100"
+      className={`block w-full px-3 py-2 text-left text-[14px] ${
+        disabled ? 'cursor-not-allowed text-slate-300' : 'text-slate-700 hover:bg-slate-100'
+      }`}
     >
       {label}
     </button>
@@ -130,9 +135,9 @@ export function TableMenu({ editor }: { editor: Editor }) {
           <Row label="Cell" disabled={!inTable} onHover={() => setSub('cell')}>
             {sub === 'cell' && (
               <SubPanel>
+                <Action label="Cell properties" disabled />
                 <Action label="Merge cells" onClick={() => run(() => editor.chain().focus().mergeCells().run())} />
                 <Action label="Split cell" onClick={() => run(() => editor.chain().focus().splitCell().run())} />
-                <Action label="Toggle header cell" onClick={() => run(() => editor.chain().focus().toggleHeaderCell().run())} />
               </SubPanel>
             )}
           </Row>
@@ -141,9 +146,15 @@ export function TableMenu({ editor }: { editor: Editor }) {
           <Row label="Row" disabled={!inTable} onHover={() => setSub('row')}>
             {sub === 'row' && (
               <SubPanel>
-                <Action label="Insert row above" onClick={() => run(() => editor.chain().focus().addRowBefore().run())} />
-                <Action label="Insert row below" onClick={() => run(() => editor.chain().focus().addRowAfter().run())} />
+                <Action label="Insert row before" onClick={() => run(() => editor.chain().focus().addRowBefore().run())} />
+                <Action label="Insert row after" onClick={() => run(() => editor.chain().focus().addRowAfter().run())} />
                 <Action label="Delete row" onClick={() => run(() => editor.chain().focus().deleteRow().run())} />
+                <Action label="Row properties" disabled />
+                <div className="my-1 border-t border-slate-200" />
+                <Action label="Cut row" disabled />
+                <Action label="Copy row" disabled />
+                <Action label="Paste row before" disabled />
+                <Action label="Paste row after" disabled />
               </SubPanel>
             )}
           </Row>
@@ -152,9 +163,14 @@ export function TableMenu({ editor }: { editor: Editor }) {
           <Row label="Column" disabled={!inTable} onHover={() => setSub('column')}>
             {sub === 'column' && (
               <SubPanel>
-                <Action label="Insert column left" onClick={() => run(() => editor.chain().focus().addColumnBefore().run())} />
-                <Action label="Insert column right" onClick={() => run(() => editor.chain().focus().addColumnAfter().run())} />
+                <Action label="Insert column before" onClick={() => run(() => editor.chain().focus().addColumnBefore().run())} />
+                <Action label="Insert column after" onClick={() => run(() => editor.chain().focus().addColumnAfter().run())} />
                 <Action label="Delete column" onClick={() => run(() => editor.chain().focus().deleteColumn().run())} />
+                <div className="my-1 border-t border-slate-200" />
+                <Action label="Cut column" disabled />
+                <Action label="Copy column" disabled />
+                <Action label="Paste column before" disabled />
+                <Action label="Paste column after" disabled />
               </SubPanel>
             )}
           </Row>

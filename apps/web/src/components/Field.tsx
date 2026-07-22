@@ -173,13 +173,15 @@ function FilesField({ files }: { files: UploadedFile[] }) {
 }
 
 export function Field({
-  field, files, onChange, activeFieldId, onActivate,
+  field, files, onChange, activeFieldId, onActivate, docTitle,
 }: {
   field: ContentField;
   files: UploadedFile[];
   onChange: (id: string, value: unknown) => void;
   activeFieldId: string | null;
   onActivate: (id: string) => void;
+  /** Item name — used as the print/preview document title in the editor. */
+  docTitle?: string;
 }) {
   // Section fields hold no value and get no chrome.
   if (field.type === 'heading') {
@@ -349,6 +351,7 @@ export function Field({
           placeholder="Start writing…"
           active={activeFieldId === field.id}
           onActivate={() => onActivate(field.id)}
+          docTitle={docTitle}
         />
       </FieldShell>
     );

@@ -127,6 +127,7 @@ function Loaded({ item, onReload }: { item: ApiItem; onReload: () => void }) {
               onChange={onChange}
               activeFieldId={activeFieldId}
               onActivate={setActiveFieldId}
+              docTitle={item.name}
             />
           );
         })}

@@ -65,8 +65,14 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.64.0
         version: 5.101.2(react@19.2.7)
+      '@tiptap/core':
+        specifier: ^2.27.2
+        version: 2.27.2(@tiptap/pm@2.27.2)
       '@tiptap/extension-color':
         specifier: ^2.11.5
+        version: 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))(@tiptap/extension-text-style@2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2)))
+      '@tiptap/extension-font-family':
+        specifier: ^2.27.2
         version: 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))(@tiptap/extension-text-style@2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2)))
       '@tiptap/extension-highlight':
         specifier: ^2.11.5
@@ -80,6 +86,12 @@ importers:
       '@tiptap/extension-placeholder':
         specifier: ^2.11.5
         version: 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))(@tiptap/pm@2.27.2)
+      '@tiptap/extension-subscript':
+        specifier: ^2.27.2
+        version: 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))
+      '@tiptap/extension-superscript':
+        specifier: ^2.27.2
+        version: 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))
       '@tiptap/extension-table':
         specifier: ^2.11.5
         version: 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))(@tiptap/pm@2.27.2)
@@ -957,6 +969,12 @@ packages:
       '@tiptap/core': ^2.7.0
       '@tiptap/pm': ^2.7.0
 
+  '@tiptap/extension-font-family@2.27.2':
+    resolution: {integrity: sha512-Lc3fAF/t3QXuG5AiOjGiCoyxJH7QyAOj5P+X4O6NfFtHST2wxoqIKqnlXkROv+g49Th/ypVGQ/z47wb6EG4iQg==}
+    peerDependencies:
+      '@tiptap/core': ^2.7.0
+      '@tiptap/extension-text-style': ^2.7.0
+
   '@tiptap/extension-gapcursor@2.27.2':
     resolution: {integrity: sha512-/c9VF1HBxj+AP54XGVgCmD9bEGYc5w5OofYCFQgM7l7PB1J00A4vOke0oPkHJnqnOOyPlFaxO/7N6l3XwFcnKA==}
     peerDependencies:
@@ -1029,6 +1047,16 @@ packages:
 
   '@tiptap/extension-strike@2.27.2':
     resolution: {integrity: sha512-HHIjhafLhS2lHgfAsCwC1okqMsQzR4/mkGDm4M583Yftyjri1TNA7lzhzXWRFWiiMfJxKtdjHjUAQaHuteRTZw==}
+    peerDependencies:
+      '@tiptap/core': ^2.7.0
+
+  '@tiptap/extension-subscript@2.27.2':
+    resolution: {integrity: sha512-x2Oz7hrI4KvzzB9pWChFRm6JnKdYAUQDyrlSROngtzXT7VpNQNoD5s8OlICzDeNsaRKzhR8omIz2z17S1VB48g==}
+    peerDependencies:
+      '@tiptap/core': ^2.7.0
+
+  '@tiptap/extension-superscript@2.27.2':
+    resolution: {integrity: sha512-VTGJDuNqdesibSVW94Q71VaGVGr/bwBppdaNLn7k6beOegALfIH7ncArlkD/eihOlJ2qaWiT7FoWNLTb/Fdv1w==}
     peerDependencies:
       '@tiptap/core': ^2.7.0
 
@@ -2571,6 +2599,11 @@ snapshots:
       '@tiptap/pm': 2.27.2
       tippy.js: 6.3.7
 
+  '@tiptap/extension-font-family@2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))(@tiptap/extension-text-style@2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2)))':
+    dependencies:
+      '@tiptap/core': 2.27.2(@tiptap/pm@2.27.2)
+      '@tiptap/extension-text-style': 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))
+
   '@tiptap/extension-gapcursor@2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))(@tiptap/pm@2.27.2)':
     dependencies:
       '@tiptap/core': 2.27.2(@tiptap/pm@2.27.2)
@@ -2630,6 +2663,14 @@ snapshots:
       '@tiptap/pm': 2.27.2
 
   '@tiptap/extension-strike@2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))':
+    dependencies:
+      '@tiptap/core': 2.27.2(@tiptap/pm@2.27.2)
+
+  '@tiptap/extension-subscript@2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))':
+    dependencies:
+      '@tiptap/core': 2.27.2(@tiptap/pm@2.27.2)
+
+  '@tiptap/extension-superscript@2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))':
     dependencies:
       '@tiptap/core': 2.27.2(@tiptap/pm@2.27.2)
 
