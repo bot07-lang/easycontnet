@@ -172,6 +172,9 @@ export interface ItemVersion {
   item_name: string;
   status_name: string | null;
   status_color: string | null;
+  /** For status_change versions: the status the item moved from (null otherwise). */
+  from_status_name: string | null;
+  from_status_color: string | null;
   created_at: string;
   created_by_name: string | null;
   created_by_role: string | null;
@@ -282,6 +285,13 @@ export const api = {
   getVersion: (versionId: string) => request<VersionDetail>(`/content/versions/${versionId}`),
   renameVersion: (versionId: string, label: string) =>
     request<{ ok: true }>(`/content/versions/${versionId}`, { method: 'PATCH', body: JSON.stringify({ label }) }),
+  deleteVersion: (versionId: string) =>
+    request<{ ok: true }>(`/content/versions/${versionId}`, { method: 'DELETE' }),
+  copyVersionToItem: (versionId: string, name: string) =>
+    request<{ id: string }>(`/content/versions/${versionId}/copy-to-item`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
   restoreVersion: (id: string, versionId: string) =>
     request<{ ok: true }>(`/content/items/${id}/versions/${versionId}/restore`, { method: 'POST' }),
   getAssignmentInfo: (id: string) => request<AssignmentInfo>(`/content/items/${id}/assignment`),
