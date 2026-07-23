@@ -7,6 +7,23 @@ import { toPlainText } from '../lib/counts';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
+// How long after you stop typing before a field autosaves. With flush-on-leave in
+// place this controls save frequency while typing, not data safety, so it can be
+// raised to reduce writes without risking edits.
+const AUTOSAVE_DEBOUNCE_MS = 700;
+
+/** Update one field's value inside a cached ApiItem, so the item query stays in
+ *  sync with autosaves and returning to the editor shows the latest value. */
+function patchFieldValue(item: ApiItem, fieldId: string, value: unknown): ApiItem {
+  return {
+    ...item,
+    tabs: item.tabs.map((t) => ({
+      ...t,
+      fields: t.fields.map((f) => (f.id === fieldId ? { ...f, value } : f)),
+    })),
+  };
+}
+
 /**
  * Loads a real content item from the API, renders its fields, and autosaves
  * each field a short beat after you stop typing. A failed save (e.g. RLS says
@@ -16,6 +33,10 @@ export function ItemEditor({ itemId, projectId }: { itemId: string; projectId?: 
   const { data, isLoading, error } = useQuery({
     queryKey: ['item', itemId],
     queryFn: () => api.getItem(itemId),
+    // Serve a recently-loaded item from cache instead of immediately re-fetching,
+    // so leaving and returning shows the value we just saved rather than a stale
+    // re-fetch. The cache is kept in sync with each save (patchFieldValue).
+    staleTime: 60_000,
   });
   // Bumped after a restore to remount Loaded so its field state re-initialises.
   const [nonce, setNonce] = useState(0);
@@ -34,26 +55,65 @@ function Loaded({ item, projectId, onReload }: { item: ApiItem; projectId?: stri
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
   const [save, setSave] = useState<SaveState>('idle');
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Field values edited but not yet confirmed saved. Drives flush-on-leave and the
+  // unsaved-changes guard; a field is removed once its save succeeds.
+  const pending = useRef<Record<string, unknown>>({});
+  const qc = useQueryClient();
 
   const tab = item.tabs.find((t) => t.id === activeTab) ?? item.tabs[0];
 
-  const onChange = (fieldId: string, value: unknown) => {
-    setValues((prev) => ({ ...prev, [fieldId]: value }));
-    setSave('saving');
-    clearTimeout(timers.current[fieldId]);
-    timers.current[fieldId] = setTimeout(async () => {
-      try {
-        await api.saveField(item.id, fieldId, value);
-        setSave('saved');
-      } catch {
-        setSave('error');
-      }
-    }, 700);
+  const saveNow = async (fieldId: string, value: unknown) => {
+    try {
+      await api.saveField(item.id, fieldId, value);
+      // Only mark clean if no newer edit landed while this save was in flight.
+      if (pending.current[fieldId] === value) delete pending.current[fieldId];
+      // Keep the item cache in sync so returning to the editor shows this value.
+      qc.setQueryData<ApiItem>(['item', item.id], (old) => (old ? patchFieldValue(old, fieldId, value) : old));
+      setSave('saved');
+    } catch {
+      setSave('error');
+    }
   };
 
+  const onChange = (fieldId: string, value: unknown) => {
+    setValues((prev) => ({ ...prev, [fieldId]: value }));
+    pending.current[fieldId] = value;
+    setSave('saving');
+    clearTimeout(timers.current[fieldId]);
+    timers.current[fieldId] = setTimeout(() => void saveNow(fieldId, value), AUTOSAVE_DEBOUNCE_MS);
+  };
+
+  // Flush on leave: when the editor unmounts (back, switch item, go to Dashboard),
+  // save any pending edit immediately instead of cancelling it — otherwise an edit
+  // made inside the debounce window is lost. Fire-and-forget: on in-app navigation
+  // the page stays alive, so the requests finish in the background.
   useEffect(() => {
+    const p = pending.current;
     const t = timers.current;
-    return () => Object.values(t).forEach(clearTimeout);
+    const itemId = item.id;
+    const client = qc;
+    return () => {
+      for (const [fieldId, value] of Object.entries(p)) {
+        clearTimeout(t[fieldId]);
+        // Optimistically patch the cache so returning shows the flushed value even
+        // before the fire-and-forget PUT has committed.
+        client.setQueryData<ApiItem>(['item', itemId], (old) => (old ? patchFieldValue(old, fieldId, value) : old));
+        void api.saveField(itemId, fieldId, value);
+      }
+    };
+  }, [item.id, qc]);
+
+  // Hard leave (reload / tab close) can't run the unmount flush reliably, so warn
+  // before the browser drops a pending edit.
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (Object.keys(pending.current).length > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
   }, []);
 
   const totalWords = useMemo(
