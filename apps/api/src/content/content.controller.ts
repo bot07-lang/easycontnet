@@ -119,6 +119,22 @@ export class ContentController {
     return this.content.renameVersion(user, versionId, body.label);
   }
 
+  @Delete('versions/:versionId')
+  deleteVersion(@CurrentUser() user: UserContext, @Param('versionId') versionId: string) {
+    return this.content.deleteVersion(user, versionId);
+  }
+
+  /** Copy a version's content into a new item (same project + template, fresh history). */
+  @Post('versions/:versionId/copy-to-item')
+  copyVersionToItem(
+    @CurrentUser() user: UserContext,
+    @Param('versionId') versionId: string,
+    @Body() body: { name?: string },
+  ) {
+    if (!body?.name?.trim()) throw new BadRequestException('name is required');
+    return this.content.copyVersionToItem(user, versionId, body.name);
+  }
+
   /** Restore a version. manage_content_items — it overwrites every field value. */
   @Post('items/:id/versions/:versionId/restore')
   @RequirePermission('manage_content_items')

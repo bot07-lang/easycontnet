@@ -225,13 +225,23 @@ export class ContentService {
           [itemId, statusId],
         );
         if (!valid.rowCount) throw new NotFoundException('That status is not in this item’s project');
+        // The status the item is moving *from*, captured before the update so the
+        // version can show the from → to transition.
+        const fromStatus = (
+          await c.query(
+            `select s.name from public.content_items ci
+               left join public.workflow_statuses s on s.id = ci.current_status_id
+              where ci.id = $1`,
+            [itemId],
+          )
+        ).rows[0]?.name ?? null;
         const { rowCount } = await c.query(
           `update public.content_items set current_status_id = $2, updated_at = now() where id = $1`,
           [itemId, statusId],
         );
         if (!rowCount) throw new ForbiddenException('You cannot change this item');
         // A status change auto-creates a version, per the reference.
-        await this.snapshot(c, user, itemId, 'status_change', null);
+        await this.snapshot(c, user, itemId, 'status_change', null, fromStatus);
         return { ok: true as const };
       });
     } catch (err) {
@@ -308,14 +318,15 @@ export class ContentService {
   async listVersions(user: UserContext, itemId: string) {
     return this.db.withUser(user, async (c) => {
       const { rows } = await c.query(
-        `select v.id, v.kind, v.label, v.item_name, v.status_name, v.created_at,
+        `select v.id, v.kind, v.label, v.item_name, v.status_name, v.from_status_name, v.created_at,
                 pr.full_name as created_by_name, ro.name as created_by_role,
-                ws.color as status_color
+                ws.color as status_color, fws.color as from_status_color
            from public.content_item_versions v
            left join public.profiles pr on pr.id = v.created_by
            left join public.roles ro on ro.id = pr.role_id
            left join public.content_items ci on ci.id = v.item_id
            left join public.workflow_statuses ws on ws.name = v.status_name and ws.project_id = ci.project_id
+           left join public.workflow_statuses fws on fws.name = v.from_status_name and fws.project_id = ci.project_id
           where v.item_id = $1
           order by v.created_at desc`,
         [itemId],
@@ -352,6 +363,74 @@ export class ContentService {
       if (!rowCount) throw new NotFoundException('Version not found');
       return { ok: true as const };
     });
+  }
+
+  /** Delete a version (RLS write policy = project membership). */
+  async deleteVersion(user: UserContext, versionId: string) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const { rowCount } = await c.query(
+          `delete from public.content_item_versions where id = $1`,
+          [versionId],
+        );
+        if (!rowCount) throw new NotFoundException('Version not found');
+        return { ok: true as const };
+      });
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot delete this version');
+      throw err;
+    }
+  }
+
+  /**
+   * Copy a version's snapshot into a brand-new content item in the same project
+   * and template. The new item starts fresh — initial status, its own version
+   * history — only the field values are carried over, matching the reference.
+   */
+  async copyVersionToItem(user: UserContext, versionId: string, name: string) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const v = (
+          await c.query(
+            `select v.snapshot, ci.project_id, ci.template_id
+               from public.content_item_versions v
+               join public.content_items ci on ci.id = v.item_id
+              where v.id = $1`,
+            [versionId],
+          )
+        ).rows[0];
+        if (!v) throw new NotFoundException('Version not found');
+
+        const newId = (
+          await c.query(`select public.api_create_content_item($1, $2, $3, $4, $5::text[]) as id`, [
+            v.project_id,
+            name.trim() || 'Untitled',
+            v.template_id,
+            null,
+            [],
+          ])
+        ).rows[0]?.id as string;
+
+        // Seed the new item's field values from the snapshot (only fields that
+        // still exist on the template).
+        await c.query(
+          `insert into public.content_field_values (item_id, field_id, org_id, value)
+           select $1, (s.key)::uuid, $2, s.value
+             from jsonb_each($3::jsonb) as s
+            where exists (select 1 from public.template_fields f where f.id = (s.key)::uuid)
+           on conflict (item_id, field_id)
+           do update set value = excluded.value, updated_at = now()`,
+          [newId, user.orgId, JSON.stringify(v.snapshot)],
+        );
+        return { id: newId };
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === RLS_VIOLATION) {
+        throw new ForbiddenException('You cannot create items in this project');
+      }
+      throw err;
+    }
   }
 
   /**
@@ -399,6 +478,7 @@ export class ContentService {
     itemId: string,
     kind: 'manual' | 'status_change',
     label: string | null,
+    fromStatusName: string | null = null,
   ) {
     const meta = (
       await c.query(
@@ -421,9 +501,9 @@ export class ContentService {
 
     const { rows } = await c.query(
       `insert into public.content_item_versions
-         (org_id, item_id, kind, label, item_name, status_name, snapshot, created_by)
-       values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
-      [user.orgId, itemId, kind, label, meta.name, meta.status_name, snap, user.userId],
+         (org_id, item_id, kind, label, item_name, status_name, from_status_name, snapshot, created_by)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
+      [user.orgId, itemId, kind, label, meta.name, meta.status_name, fromStatusName, snap, user.userId],
     );
     return { id: rows[0].id as string };
   }
