@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ApiItem, type ItemVersion } from '../lib/api';
+import * as saveManager from '../lib/save-manager';
 import type { ContentField } from '../mock/article';
 import { Field } from './Field';
 import { toPlainText } from '../lib/counts';
 
-type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+type SaveState = 'idle' | 'saving' | 'saved' | 'retrying' | 'error';
 
 // How long after you stop typing before a field autosaves. With flush-on-leave in
 // place this controls save frequency while typing, not data safety, so it can be
@@ -62,17 +63,17 @@ function Loaded({ item, projectId, onReload }: { item: ApiItem; projectId?: stri
 
   const tab = item.tabs.find((t) => t.id === activeTab) ?? item.tabs[0];
 
-  const saveNow = async (fieldId: string, value: unknown) => {
-    try {
-      await api.saveField(item.id, fieldId, value);
-      // Only mark clean if no newer edit landed while this save was in flight.
-      if (pending.current[fieldId] === value) delete pending.current[fieldId];
-      // Keep the item cache in sync so returning to the editor shows this value.
-      qc.setQueryData<ApiItem>(['item', item.id], (old) => (old ? patchFieldValue(old, fieldId, value) : old));
-      setSave('saved');
-    } catch {
-      setSave('error');
-    }
+  // Hand a field off to the save manager (retries + localStorage backup). On
+  // confirmed save, drop it from `pending` and sync the item cache so returning
+  // shows this value.
+  const persist = (fieldId: string, value: unknown) => {
+    saveManager.saveField(item.id, fieldId, value, {
+      onStatus: setSave,
+      onSaved: () => {
+        if (pending.current[fieldId] === value) delete pending.current[fieldId];
+        qc.setQueryData<ApiItem>(['item', item.id], (old) => (old ? patchFieldValue(old, fieldId, value) : old));
+      },
+    });
   };
 
   const onChange = (fieldId: string, value: unknown) => {
@@ -80,7 +81,7 @@ function Loaded({ item, projectId, onReload }: { item: ApiItem; projectId?: stri
     pending.current[fieldId] = value;
     setSave('saving');
     clearTimeout(timers.current[fieldId]);
-    timers.current[fieldId] = setTimeout(() => void saveNow(fieldId, value), AUTOSAVE_DEBOUNCE_MS);
+    timers.current[fieldId] = setTimeout(() => persist(fieldId, value), AUTOSAVE_DEBOUNCE_MS);
   };
 
   // Flush on leave: when the editor unmounts (back, switch item, go to Dashboard),
@@ -96,12 +97,31 @@ function Loaded({ item, projectId, onReload }: { item: ApiItem; projectId?: stri
       for (const [fieldId, value] of Object.entries(p)) {
         clearTimeout(t[fieldId]);
         // Optimistically patch the cache so returning shows the flushed value even
-        // before the fire-and-forget PUT has committed.
+        // before the save commits; the manager retries + backs it up, so it's safe.
         client.setQueryData<ApiItem>(['item', itemId], (old) => (old ? patchFieldValue(old, fieldId, value) : old));
-        void api.saveField(itemId, fieldId, value);
+        saveManager.saveField(itemId, fieldId, value);
       }
     };
   }, [item.id, qc]);
+
+  // Recover edits the save manager stashed (a previous save that failed, or a tab
+  // closed mid-save): show them in the editor and re-attempt the save.
+  useEffect(() => {
+    const recovered = saveManager.recoverPending(item.id);
+    if (!recovered.length) return;
+    setValues((prev) => {
+      const next = { ...prev };
+      for (const { fieldId, value } of recovered) next[fieldId] = value;
+      return next;
+    });
+    for (const { fieldId, value } of recovered) {
+      pending.current[fieldId] = value;
+      qc.setQueryData<ApiItem>(['item', item.id], (old) => (old ? patchFieldValue(old, fieldId, value) : old));
+      persist(fieldId, value);
+    }
+    // Runs once per item mount; persist/qc are stable enough for recovery.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id]);
 
   // Hard leave (reload / tab close) can't run the unmount flush reliably, so warn
   // before the browser drops a pending edit.
@@ -157,8 +177,9 @@ function Loaded({ item, projectId, onReload }: { item: ApiItem; projectId?: stri
         <span className="text-xs text-slate-400">Item #{item.itemNumber} · {totalWords} words</span>
         <span className="ml-auto text-xs">
           {save === 'saving' && <span className="text-slate-400">Saving…</span>}
+          {save === 'retrying' && <span className="text-amber-600">Reconnecting…</span>}
           {save === 'saved' && <span className="text-green-600">Saved</span>}
-          {save === 'error' && <span className="text-red-600">Couldn’t save — you may not have edit access</span>}
+          {save === 'error' && <span className="text-red-600">Couldn’t save — your changes are kept locally</span>}
         </span>
       </div>
 
