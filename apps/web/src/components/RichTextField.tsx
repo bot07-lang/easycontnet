@@ -6,13 +6,20 @@ import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 
 // The default Image node only carries src/alt/title. Extend it so the
-// Insert/Edit Image dialog can set width and height too.
+// Insert/Edit Image dialog can set width and height, and so a library image
+// dragged into content keeps a `data-full-name` reference to its full-size
+// original (src holds the lightweight thumbnail) — matching the reference.
 const SizedImage = Image.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
       width: { default: null },
       height: { default: null },
+      dataFullName: {
+        default: null,
+        parseHTML: (el) => el.getAttribute('data-full-name'),
+        renderHTML: (attrs) => (attrs.dataFullName ? { 'data-full-name': attrs.dataFullName } : {}),
+      },
     };
   },
 });
@@ -108,6 +115,29 @@ export function RichTextField({
         // when editing), so no fixed min-height here.
         class:
           'prose-editor px-6 py-4 focus:outline-none text-[17px] leading-relaxed text-slate-800',
+      },
+      // Insert an image dropped from the Files field at the drop point. The card
+      // carries its URL under our own MIME type; a normal internal node move
+      // (moved=true) is left to ProseMirror.
+      handleDrop: (view, event, _slice, moved) => {
+        if (moved) return false;
+        const raw = event.dataTransfer?.getData('application/x-cw-image');
+        if (!raw) return false;
+        let data: { url?: string; name?: string; fullName?: string };
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          return false;
+        }
+        if (!data.url) return false;
+        const imageType = view.state.schema.nodes.image;
+        if (!imageType) return false;
+        event.preventDefault();
+        const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? view.state.selection.from;
+        // src = lightweight thumbnail; data-full-name = the original (full-size).
+        const node = imageType.create({ src: data.url, alt: data.name ?? '', dataFullName: data.fullName ?? null });
+        view.dispatch(view.state.tr.insert(at, node));
+        return true;
       },
     },
   });

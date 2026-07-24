@@ -16,7 +16,6 @@ const RLS_VIOLATION = '42501';
 const FK_VIOLATION = '23503';
 
 const BUCKET = 'content-files';
-const DOWNLOAD_TTL = 60 * 60; // signed download URLs live one hour
 
 interface FileRow {
   id: string;
@@ -34,9 +33,12 @@ interface FileRow {
 /**
  * Project file library. Metadata lives in public.project_files (RLS-scoped, so
  * every read/write rides the project-membership gate as the caller); the bytes
- * live in the private content-files bucket. The API is the only thing that
- * touches storage — with the service role — and hands the browser short-lived
- * signed URLs, so the bucket never needs to be public.
+ * live in the content-files bucket. The API is the only thing that WRITES to
+ * storage (with the service role). The bucket is public-read (like the
+ * reference), so download URLs are permanent public URLs — inline images can be
+ * embedded straight into content and stay valid, and exports work when shared.
+ * Files aren't listable; a URL only reaches a file whose unguessable path you
+ * already hold.
  *
  * Upload is two steps to sidestep Vercel's ~4.5MB function body cap: the API
  * issues a signed upload URL (permission-checked), the browser PUTs the bytes
@@ -181,9 +183,18 @@ export class FilesService {
     return { ok: true };
   }
 
-  /** Shape a row for the client and attach a signed download URL. */
+  /** Shape a row for the client. The bucket is public (like the reference), so
+   *  URLs never expire — inline images can be embedded in content and exports work
+   *  when shared. `url` is a 250px thumbnail (Supabase resizes on the fly, CDN-
+   *  cached) used for display everywhere; `fullUrl` is the original, for download /
+   *  full-size and the inline image's data-full-name reference. */
   private async withUrl(row: FileRow) {
-    const { data } = await this.storage.storage.from(BUCKET).createSignedUrl(row.storage_path, DOWNLOAD_TTL);
+    const store = this.storage.storage.from(BUCKET);
+    const fullUrl = store.getPublicUrl(row.storage_path).data.publicUrl;
+    const isImage = (row.mime ?? '').startsWith('image/');
+    const url = isImage
+      ? store.getPublicUrl(row.storage_path, { transform: { width: 250, height: 250, resize: 'contain' } }).data.publicUrl
+      : fullUrl;
     return {
       id: row.id,
       name: row.name,
@@ -194,7 +205,8 @@ export class FilesService {
       uploadedByRole: row.uploaded_by_role ?? null,
       linkedItems: row.linked_items ?? [],
       createdAt: row.created_at,
-      url: data?.signedUrl ?? null,
+      url,
+      fullUrl,
     };
   }
 

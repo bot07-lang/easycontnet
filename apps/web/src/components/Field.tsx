@@ -116,7 +116,7 @@ function FilesField({
     if (url) downloadFile(url, name);
   };
 
-  const downloadAll = () => value.forEach((f) => download(f.name, byId.get(f.id)?.url));
+  const downloadAll = () => value.forEach((f) => download(f.name, byId.get(f.id)?.fullUrl));
 
   return (
     <div className="px-5 py-5">
@@ -144,7 +144,19 @@ function FilesField({
           const ext = f.name.match(/\.(\w+)$/)?.[1] ?? f.mime?.split('/')[1] ?? 'file';
           return (
             <figure key={f.id} title={tooltipFor(f, lib)}
-                    className="flex flex-col overflow-hidden rounded border border-slate-200 bg-white">
+                    draggable={!!isImage}
+                    onDragStart={(e) => {
+                      // Carry the file's permanent public URL so a rich-text field can
+                      // insert it inline (see RichTextField's handleDrop).
+                      if (isImage && url) {
+                        // src = the small thumbnail (display); fullName = the original
+                        // (kept as data-full-name for full-size), matching the reference.
+                        e.dataTransfer.setData('application/x-cw-image', JSON.stringify({ url, name: f.name, fullName: lib?.fullUrl ?? url }));
+                        e.dataTransfer.setData('text/uri-list', url);
+                        e.dataTransfer.effectAllowed = 'copy';
+                      }
+                    }}
+                    className={`flex flex-col overflow-hidden rounded border border-slate-200 bg-white ${isImage ? 'cursor-grab active:cursor-grabbing' : ''}`}>
               <div className="relative h-[150px] shrink-0 bg-slate-100">
                 {/* Constant action toolbar over the image, matching the reference. */}
                 <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between p-1.5">
@@ -153,10 +165,10 @@ function FilesField({
                       <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
                       <path d="M12 8v5M9.5 10.5h5" />
                     </CardBtn>
-                    <CardBtn title="View" disabled={!url} onClick={() => url && setViewUrl(url)}>
+                    <CardBtn title="View" disabled={!lib?.fullUrl} onClick={() => lib?.fullUrl && setViewUrl(lib.fullUrl)}>
                       <circle cx="11" cy="11" r="6" /><path d="m20 20-3.5-3.5M11 8.5v5M8.5 11h5" />
                     </CardBtn>
-                    <CardBtn title="Download" disabled={!url} onClick={() => download(f.name, url)}>
+                    <CardBtn title="Download" disabled={!lib?.fullUrl} onClick={() => download(f.name, lib?.fullUrl)}>
                       <path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14" />
                     </CardBtn>
                   </div>

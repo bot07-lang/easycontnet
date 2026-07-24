@@ -439,7 +439,10 @@ export interface LibraryFile {
   uploadedByRole: string | null;
   linkedItems: { id: string; name: string }[];
   createdAt: string;
+  /** 250px thumbnail URL for display (images); the original URL for other types. */
   url: string | null;
+  /** The original file URL — download / full-size / inline data-full-name. */
+  fullUrl: string | null;
 }
 
 /**
