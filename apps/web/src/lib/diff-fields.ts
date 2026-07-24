@@ -120,12 +120,20 @@ export function fieldChanged(oldHtml: string, newHtml: string): boolean {
  */
 export function diffFieldHtml(oldHtml: string, newHtml: string): string {
   if (oldHtml === newHtml) return newHtml;
-  if (!HtmlDiff) return newHtml; // engine failed to resolve — degrade gracefully
+  // Block-level replacement wrappers (cw-block) so the red/green background paints
+  // the whole old/new block, not a collapsed inline box.
+  const replace = `<del class="cw-block">${oldHtml}</del><ins class="cw-block">${newHtml}</ins>`;
+  if (!HtmlDiff) return replace; // engine failed to resolve — degrade gracefully
   try {
-    return HtmlDiff.execute(oldHtml, newHtml);
+    const out = HtmlDiff.execute(oldHtml, newHtml);
+    // When only formatting/structure changed with identical text (a colour span,
+    // a bullet↔numbered list, etc.), htmldiff emits NO <ins>/<del> and silently
+    // returns the new version — so the change wouldn't show. Fall back to an
+    // explicit old→new replacement (old struck red, new green), matching the
+    // reference's block-replace behaviour.
+    return /<(?:ins|del)\b/i.test(out) ? out : replace;
   } catch {
-    // Never let a diff edge-case break the compare view — fall back to showing
-    // the new version plainly.
-    return newHtml;
+    // Never let a diff edge-case break the compare view.
+    return replace;
   }
 }

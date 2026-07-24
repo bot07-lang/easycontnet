@@ -362,11 +362,14 @@ function FieldDiff({ field, aValue, bValue }: { field: DiffFieldMeta; aValue: un
       </div>
 
       {view === 'split' ? (
+        // Each side renders its OWN raw HTML — old (as it was) | new (as it is) —
+        // so formatting/colour changes show by the sides differing, no overlay.
         <div className="grid grid-cols-2 divide-x divide-slate-200">
-          <div className="cw-diff cw-split-old px-5 py-4" dangerouslySetInnerHTML={{ __html: (changed ? diffed : aHtml) || '<span class="cw-empty">Empty</span>' }} />
-          <div className="cw-diff cw-split-new px-5 py-4" dangerouslySetInnerHTML={{ __html: (changed ? diffed : bHtml) || '<span class="cw-empty">Empty</span>' }} />
+          <div className="cw-diff px-5 py-4" dangerouslySetInnerHTML={{ __html: aHtml || '<span class="cw-empty">Empty</span>' }} />
+          <div className="cw-diff px-5 py-4" dangerouslySetInnerHTML={{ __html: bHtml || '<span class="cw-empty">Empty</span>' }} />
         </div>
       ) : (
+        // Unified: one combined block with htmldiff's inline del (red) + ins (green).
         <div className="cw-diff px-5 py-4" dangerouslySetInnerHTML={{ __html: (changed ? diffed : bHtml) || '<span class="cw-empty">Empty</span>' }} />
       )}
     </div>
@@ -393,11 +396,24 @@ export const DIFF_CSS = `
 
 .cw-diff ins { background: #dcfce7; color: #14532d; text-decoration: none; border-radius: 2px; }
 .cw-diff del { background: #fee2e2; color: #7f1d1d; text-decoration: line-through; border-radius: 2px; }
+/* Block-replace fallback (formatting/structure-only change): the red/green
+   highlight hugs each line's text — even lines broken inside one block — via an
+   inline box-decoration-break, keeping the content's own colours. Each block is
+   made inline and given a forced line break after it (::after "\A") so paragraph
+   separation is preserved. */
+.cw-diff del.cw-block, .cw-diff ins.cw-block { display: block; color: inherit; background: none; }
+.cw-diff del.cw-block { text-decoration-color: #ef4444; }
+.cw-diff del.cw-block :where(p, li, h1, h2, h3, h4, blockquote, pre),
+.cw-diff ins.cw-block :where(p, li, h1, h2, h3, h4, blockquote, pre) {
+  display: inline; -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  border-radius: 2px; padding: 0 2px;
+}
+.cw-diff del.cw-block :where(p, li, h1, h2, h3, h4, blockquote, pre) { background: #fee2e2; }
+.cw-diff ins.cw-block :where(p, li, h1, h2, h3, h4, blockquote, pre) { background: #dcfce7; }
+.cw-diff del.cw-block :where(p, li, h1, h2, h3, h4, blockquote, pre)::after,
+.cw-diff ins.cw-block :where(p, li, h1, h2, h3, h4, blockquote, pre)::after { content: "\A"; white-space: pre; }
+.cw-diff del.cw-block :where(ul, ol), .cw-diff ins.cw-block :where(ul, ol) { padding-left: 0; list-style: none; margin: 0; }
 .cw-diff ins img { outline: 2px solid #22c55e; }
 .cw-diff del img { outline: 2px solid #ef4444; opacity: 0.7; }
 .cw-empty { color: #94a3b8; font-style: italic; }
-
-/* Split view: same diff rendered twice, each column hiding the other side's marks. */
-.cw-split-old ins { display: none; }
-.cw-split-new del { display: none; }
 `;
