@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { lazy, Suspense, useEffect, useId, useState } from 'react';
+import { useEditor, EditorContent, BubbleMenu } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
@@ -49,6 +49,13 @@ import Subscript from '@tiptap/extension-subscript';
 import FontFamily from '@tiptap/extension-font-family';
 import { FontSize, LineHeight, Div, Indent } from './editor-extensions';
 import { EditorToolbar } from './EditorToolbar';
+import { ImageDialog, type ImageValue } from './ImageDialog';
+import { uploadDerivedImage, type DerivedImage } from '../lib/upload';
+import { rotateImageToBlob } from '../lib/image-edit';
+
+// filerobot is heavy — lazy-load the Edit Image modal so it (and filerobot) stay
+// out of the main bundle and only load when the editor is opened.
+const EditImageModal = lazy(() => import('./EditImageModal'));
 
 /**
  * A rich-text field. Every extension here is MIT-licensed — the paid Tiptap
@@ -63,6 +70,7 @@ export function RichTextField({
   active,
   onActivate,
   docTitle,
+  projectId,
 }: {
   value: string;
   onChange: (html: string) => void;
@@ -73,10 +81,17 @@ export function RichTextField({
   onActivate: () => void;
   /** Item name — printed/previewed as the document title. */
   docTitle?: string;
+  /** Project the item belongs to — needed to upload rotated/edited images. */
+  projectId?: string;
 }) {
   // Fullscreen is an editor-only overlay (the field fills the viewport), not
   // the browser's native fullscreen — matching the reference's behaviour.
   const [fullscreen, setFullscreen] = useState(false);
+  const bubbleKey = useId(); // unique BubbleMenu plugin key per field instance
+  // Inline image editing state.
+  const [busy, setBusy] = useState(false); // an upload (rotate/edit) is in flight
+  const [editSrc, setEditSrc] = useState<string | null>(null); // Edit Image modal source
+  const [imgDialog, setImgDialog] = useState<ImageValue | null>(null); // Insert/Edit Image
 
   const editor = useEditor({
     extensions: [
@@ -152,6 +167,62 @@ export function RichTextField({
 
   if (!editor) return <div className="h-64 animate-pulse bg-slate-50" />;
 
+  // Point the selected image at the freshly-uploaded (rotated/edited) derived
+  // image: src → its thumbnail, data-full-name → the full-size. The derived image
+  // is NOT added to the Files library (matching the reference — only originals show
+  // there), so there's nothing to refresh.
+  const applyNewFile = (img: DerivedImage) => {
+    const newSrc = img.url || img.fullUrl || '';
+    const swap = () => {
+      editor
+        .chain()
+        .focus()
+        .updateAttributes('image', { src: newSrc, dataFullName: img.fullUrl || null, width: null, height: null })
+        .run();
+    };
+    if (!newSrc) return swap();
+    // Preload the new image, THEN swap — so the src change is instant and the image
+    // never blanks out mid-rotate (it updates in place, like the reference).
+    // (document.createElement, not `new Image()` — Image is the TipTap node here.)
+    const pre = document.createElement('img');
+    pre.onload = swap;
+    pre.onerror = swap;
+    pre.src = newSrc;
+  };
+
+  // The best source to edit is the full-size original (data-full-name); fall back
+  // to the displayed src for images that carry no reference.
+  const imageSource = () => {
+    const a = editor.getAttributes('image');
+    return (a.dataFullName as string) || (a.src as string) || '';
+  };
+
+  const rotate = async (degrees: 90 | -90) => {
+    if (!projectId || busy) return;
+    const source = imageSource();
+    if (!source) return;
+    setBusy(true);
+    try {
+      const blob = await rotateImageToBlob(source, degrees);
+      const alt = (editor.getAttributes('image').alt as string) || 'image.png';
+      applyNewFile(await uploadDerivedImage(projectId, blob, alt.endsWith('.png') ? alt : `${alt}.png`));
+    } catch {
+      /* leave the image as-is on failure */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openImgDialog = () => {
+    const a = editor.getAttributes('image');
+    setImgDialog({
+      src: (a.src as string) || '',
+      alt: (a.alt as string) || '',
+      width: a.width != null ? String(a.width) : '',
+      height: a.height != null ? String(a.height) : '',
+    });
+  };
+
   // Toolbar is always visible on rich fields. Focus-based show/hide proved
   // fragile under React StrictMode (the editor is torn down and rebuilt, so
   // focus listeners land on stale instances); a persistent toolbar is the
@@ -167,9 +238,91 @@ export function RichTextField({
         fullscreen={fullscreen}
         onToggleFullscreen={() => setFullscreen((v) => !v)}
       />
+
+      {/* Floating toolbar over a selected image: rotate ×2 · Edit Image · Insert/Edit.
+          Low z-index (40) so any dialog/editor (z-50+) covers it instead of it
+          floating on top; kept mounted so the buttons stay reliably clickable. */}
+      <BubbleMenu
+        editor={editor}
+        pluginKey={`image-bubble-${bubbleKey}`}
+        shouldShow={({ editor }) => editor.isActive('image')}
+        tippyOptions={{ placement: 'top', zIndex: 40 }}
+      >
+        <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+          <ImgBtn title="Rotate left" onClick={() => void rotate(-90)} disabled={busy || !projectId}>
+            <path d="M3 8a9 9 0 1 0 3-6.7L3 4" /><path d="M3 1v3h3" />
+          </ImgBtn>
+          <ImgBtn title="Rotate right" onClick={() => void rotate(90)} disabled={busy || !projectId}>
+            <path d="M21 8A9 9 0 1 1 18 1.3L21 4" /><path d="M21 1v3h-3" />
+          </ImgBtn>
+          <span className="mx-1 h-6 w-px bg-slate-200" />
+          <ImgBtn title="Edit image" onClick={() => setEditSrc(imageSource())} disabled={busy || !projectId}>
+            <rect x="3" y="3" width="18" height="18" rx="2" /><path d="m8 13 2.5-3 3 4 2-2.5L21 17" /><circle cx="8.5" cy="8.5" r="1.5" />
+          </ImgBtn>
+          <ImgBtn title="Insert/edit image" onClick={openImgDialog}>
+            <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" />
+          </ImgBtn>
+        </div>
+      </BubbleMenu>
+
       <div className={`rt-body ${fullscreen ? 'flex-1 overflow-y-auto' : ''}`}>
         <EditorContent editor={editor} />
       </div>
+
+      {/* Insert/Edit Image — editing the selected image's src/alt/size. */}
+      {imgDialog && (
+        <ImageDialog
+          initial={imgDialog}
+          onClose={() => setImgDialog(null)}
+          onSave={(v) => {
+            editor.chain().focus().updateAttributes('image', {
+              src: v.src, alt: v.alt, width: v.width || null, height: v.height || null,
+            }).run();
+            setImgDialog(null);
+          }}
+        />
+      )}
+
+      {/* Edit Image (filerobot) — lazy; on save uploads a new file and repoints. */}
+      {editSrc && projectId && (
+        <Suspense fallback={<div className="fixed inset-0 z-[70] grid place-items-center bg-white text-sm text-slate-500">Loading editor…</div>}>
+          <EditImageModal
+            src={editSrc}
+            projectId={projectId}
+            name={(editor.getAttributes('image').alt as string) || 'image.png'}
+            onApplied={applyNewFile}
+            onClose={() => setEditSrc(null)}
+          />
+        </Suspense>
+      )}
     </div>
+  );
+}
+
+/** A small square button used in the image bubble toolbar. */
+function ImgBtn({
+  title, onClick, disabled, children,
+}: {
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      // Keep the image selected — stop the editor blurring on button mousedown, so
+      // the handlers still see the selected image (src/attrs).
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+      disabled={disabled}
+      className="grid h-8 w-8 place-items-center rounded text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        {children}
+      </svg>
+    </button>
   );
 }

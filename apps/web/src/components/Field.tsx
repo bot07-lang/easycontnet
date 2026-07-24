@@ -465,6 +465,7 @@ export function Field({
           active={activeFieldId === field.id}
           onActivate={() => onActivate(field.id)}
           docTitle={docTitle}
+          projectId={projectId}
         />
       </FieldShell>
     );
