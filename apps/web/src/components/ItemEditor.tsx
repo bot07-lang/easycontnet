@@ -27,6 +27,138 @@ function patchFieldValue(item: ApiItem, fieldId: string, value: unknown): ApiIte
   };
 }
 
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escAttr = (s: string) => esc(s).replace(/"/g, '&quot;');
+
+/** Human field-type tag shown before each field name, matching the reference. */
+function fieldTypeTag(type: string, isPlainText: boolean): string {
+  switch (type) {
+    case 'single_line_text': return '[text field]';
+    case 'paragraph_text': return isPlainText ? '[text area – plain text]' : '[text area - rich text]';
+    case 'file_image_upload': return '[asset]';
+    case 'featured_image': return '[asset]';
+    case 'checkboxes': return '[checkboxes]';
+    case 'radio_buttons': return '[radio buttons]';
+    case 'dropdown_select': return '[dropdown]';
+    case 'date': return '[date]';
+    case 'heading': return '[heading]';
+    case 'guidelines': return '[guidelines]';
+    default: return `[${type}]`;
+  }
+}
+
+/** Render one field to an `.ec-field` block: [type] label + guideline + value. */
+function renderExportField(
+  f: { id: string; type: string; label: string; isPlainText: boolean; guidelines?: string; choices: string[] },
+  value: unknown,
+  fileUrls: Map<string, string>,
+): string {
+  const tag = fieldTypeTag(f.type, f.isPlainText);
+  const guideline = f.guidelines ? `<p class="field-guideline">${esc(f.guidelines)}</p>` : '';
+  const name = (label: string) => `<p class="field-name">${tag} ${esc(label)}</p>`;
+
+  // Section fields carry their text in the label / value, not a widget.
+  if (f.type === 'heading') return `<div class="ec-field">${name('')}<p>${esc(f.label)}</p></div>`;
+  if (f.type === 'guidelines') return `<div class="ec-field">${name('')}<p>${esc(String(value ?? f.label ?? ''))}</p></div>`;
+
+  let body: string;
+  if (f.type === 'checkboxes' || f.type === 'radio_buttons') {
+    const sel = Array.isArray(value) ? (value as string[]) : [];
+    const inputType = f.type === 'radio_buttons' ? 'radio' : 'checkbox';
+    body = (f.choices ?? [])
+      .map((c, i) => {
+        const cid = `${f.id}-${i}`;
+        const checked = sel.includes(c) ? ' checked' : '';
+        return `<input type="${inputType}" id="${escAttr(cid)}" name="${escAttr(f.id)}"${checked} disabled><label for="${escAttr(cid)}">${esc(c)}</label><br>`;
+      })
+      .join('');
+  } else if (f.type === 'file_image_upload') {
+    const files = Array.isArray(value) ? (value as { id: string; name: string; mime: string | null }[]) : [];
+    if (!files.length) {
+      body = '<p class="empty">—</p>';
+    } else {
+      const rows = files
+        .map((sf) => {
+          const url = fileUrls.get(sf.id);
+          const link = url ? `<a href="${escAttr(url)}">Link</a>` : '—';
+          const preview = url && (sf.mime ?? '').startsWith('image/') ? `<img src="${escAttr(url)}">` : '';
+          return `<tr><td>${esc(sf.name)}</td><td>${link}</td><td>${preview}</td></tr>`;
+        })
+        .join('');
+      body = `<table><tbody><tr><th>File name</th><th>File URL</th><th>Preview</th></tr>${rows}</tbody></table>`;
+    }
+  } else {
+    body = fieldValueToHtml({ id: f.id, type: f.type, label: f.label, isPlainText: f.isPlainText, choices: f.choices }, value) || '<p class="empty">—</p>';
+  }
+  return `<div class="ec-field">${name(f.label)}${guideline}${body}</div>`;
+}
+
+const EXPORT_STYLE = `
+body { background:#eee; min-height:100vh; box-sizing:border-box; font-family:"Helvetica Neue",Helvetica,Arial,sans-serif; font-weight:300; max-width:60rem; margin:0 auto; }
+.item-details { padding:1rem; }
+.main-content { display:flex; flex-wrap:wrap; }
+.main-content label { order:1; display:block; padding:1rem 2rem; margin:0 0.2rem 0.2rem 0; cursor:pointer; background:#90CAF9; font-weight:bold; transition:background ease 0.2s; }
+.main-content .tab { order:99; flex-grow:1; width:100%; display:none; padding:1rem; background:#fff; }
+.main-content input[type="radio"] { display:none; }
+.main-content input[type="radio"]:checked + label { background:#fff; }
+.main-content input[type="radio"]:checked + label + .tab { display:block; }
+.ec-field { border:2px solid; padding:8px; margin:8px; }
+.ec-field img { max-width:100%; height:auto; }
+.ec-field input, .ec-field label { all: revert !important; }
+.field-name { text-decoration:underline; font-weight:bold; }
+.field-guideline { color:#878787; font-style:italic; }
+.empty { color:#878787; font-style:italic; }
+table { border-collapse:collapse; width:100%; }
+td, th { border:1px solid #ddd; text-align:left; padding:8px; }
+tr:nth-child(even) { background:#ddd; }
+@media (max-width:45em) { .main-content .tab, .main-content label { order:initial; } .main-content label { width:100%; margin-right:0; margin-top:0.2rem; } }
+`;
+
+/** Assemble the whole item into a standalone HTML document that mirrors the
+ *  reference export: a details header, a tabbed layout, and every field wrapped
+ *  in an `.ec-field` block with its [type] tag, guideline and value. fileUrls
+ *  supplies live signed URLs for the asset table (resolved at export time). */
+function buildItemHtml(
+  item: ApiItem,
+  values: Record<string, unknown>,
+  fileUrls: Map<string, string>,
+  exportDate: string,
+): string {
+  const tabs = item.tabs
+    .map((t, ti) => {
+      const fields = t.fields.map((f) => renderExportField(f, values[f.id], fileUrls)).join('');
+      const id = `ec-tab-${ti}`;
+      return `<input type="radio" id="${id}" name="ec-tabs"${ti === 0 ? ' checked' : ''}><label for="${id}">${esc(t.name)}</label><div class="tab">${fields}</div>`;
+    })
+    .join('');
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/>
+<meta name="generator" content="Content Workflow"/>
+<title>${esc(item.name)}</title>
+<style>${EXPORT_STYLE}</style></head>
+<body>
+<div class="item-details">
+  <p><span style="font-weight:bold;">Brief Title: </span>${esc(item.name)}</p>
+  <p><span style="font-weight:bold;">Status: </span>${esc(item.status?.name ?? '')}</p>
+  <p><span style="font-weight:bold;">Export Date: </span>${esc(exportDate)}</p>
+</div>
+<div class="main-content">${tabs}</div>
+</body></html>`;
+}
+
+/** Trigger a client-side file download of a text blob. */
+function downloadText(filename: string, text: string, mime: string) {
+  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /**
  * Loads a real content item from the API, renders its fields, and autosaves
  * each field a short beat after you stop typing. A failed save (e.g. RLS says
@@ -56,12 +188,32 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
     Object.fromEntries(item.tabs.flatMap((t) => t.fields).map((f) => [f.id, f.value])),
   );
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const [save, setSave] = useState<SaveState>('idle');
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // Field values edited but not yet confirmed saved. Drives flush-on-leave and the
   // unsaved-changes guard; a field is removed once its save succeeds.
   const pending = useRef<Record<string, unknown>>({});
   const qc = useQueryClient();
+
+  // Export the item as a standalone HTML file. Resolves fresh signed URLs for any
+  // asset fields first (the stored value only keeps file references, not URLs).
+  const exportHtml = async () => {
+    setExportOpen(false);
+    const fileUrls = new Map<string, string>();
+    const hasFiles = item.tabs.some((t) => t.fields.some((f) => f.type === 'file_image_upload'));
+    if (hasFiles && projectId) {
+      try {
+        const files = await api.listFiles(projectId);
+        // The export's file table is a download list → use the original, not the thumbnail.
+        files.forEach((f) => { if (f.fullUrl) fileUrls.set(f.id, f.fullUrl); });
+      } catch {
+        /* fall back to exporting without live URLs */
+      }
+    }
+    const exportDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    downloadText(`${item.name || 'content'}.html`, buildItemHtml(item, values, fileUrls, exportDate), 'text/html');
+  };
 
   // Version preview (read-only) + the restore confirmation live here so both the
   // editor area and the versions sidebar can drive them.
@@ -215,11 +367,35 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
             </span>
           )}
           <span className="text-xs text-slate-400">Item #{item.itemNumber} · {totalWords} words</span>
-          <button type="button" onClick={() => saveVersion.mutate()} disabled={saveVersion.isPending}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>
-            {saveVersion.isPending ? 'Saving…' : 'Save version'}
-          </button>
+          <div className="inline-flex items-center gap-2">
+            <button type="button" onClick={() => saveVersion.mutate()} disabled={saveVersion.isPending}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>
+              {saveVersion.isPending ? 'Saving…' : 'Save version'}
+            </button>
+            <div className="relative">
+              <button type="button" onClick={() => setExportOpen((o) => !o)} title="Export"
+                      className="grid h-full place-items-center rounded-md border border-slate-300 bg-white px-1.5 py-1.5 text-slate-600 hover:bg-slate-50">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
+              </button>
+              {exportOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setExportOpen(false)} />
+                  <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl">
+                    <button type="button"
+                            onClick={() => void exportHtml()}
+                            className="block w-full px-4 py-2 text-left text-[13px] text-slate-700 hover:bg-slate-50">
+                      Export as HTML
+                    </button>
+                    <button type="button" disabled title="Coming soon"
+                            className="block w-full cursor-not-allowed px-4 py-2 text-left text-[13px] text-slate-400">
+                      Export as DOCX
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
           <span className="ml-auto text-xs">
             {save === 'saving' && <span className="text-slate-400">Saving…</span>}
             {save === 'retrying' && <span className="text-amber-600">Reconnecting…</span>}
@@ -493,7 +669,7 @@ function VersionsTab({
                       previewId === null ? 'bg-blue-50/60 shadow-[inset_3px_0_0_0_#2563eb]' : 'hover:bg-slate-50'
                     }`}>
               <div className="flex items-center justify-between">
-                <span className="text-[14px] font-semibold text-slate-800">Current</span>
+                <span className="text-[14px] font-semibold text-slate-800">{fmtTime(new Date().toISOString())}</span>
                 <Badge kind="current" />
               </div>
               {item.status && <StatusDot color={item.status.color} name={item.status.name} />}
