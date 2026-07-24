@@ -224,6 +224,18 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
     queryFn: () => api.getVersion(preview!.id),
     enabled: !!preview,
   });
+  // Library files → id→thumbnail URL, so the read-only preview shows the file/asset
+  // field as image thumbnails (like the compare view), not bare names.
+  const previewFiles = useQuery({
+    queryKey: ['files', projectId],
+    queryFn: () => api.listFiles(projectId!),
+    enabled: !!projectId && !!preview,
+  });
+  const previewFileUrls = useMemo(() => {
+    const m = new Map<string, string>();
+    (previewFiles.data ?? []).forEach((f) => { if (f.url) m.set(f.id, f.url); });
+    return m;
+  }, [previewFiles.data]);
   const saveVersion = useMutation({
     mutationFn: () => api.saveVersion(item.id),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['versions', item.id] }); },
@@ -420,6 +432,7 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
                   html={fieldValueToHtml(
                     { id: f.id, type: f.type, label: f.label, isPlainText: f.isPlainText, choices: f.choices },
                     (previewSnap.data?.snapshot ?? {})[f.id],
+                    previewFileUrls,
                   )}
                 />
               ))
@@ -459,6 +472,7 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
 
       <VersionsPanel
         item={item}
+        projectId={projectId}
         onReload={onReload}
         onOpenItem={onOpenItem}
         previewId={preview?.id ?? null}
@@ -517,9 +531,10 @@ function ReadOnlyField({ label, html }: { label: string; html: string }) {
  * three-dot menu (rename / restore).
  */
 function VersionsPanel({
-  item, onReload, onOpenItem, previewId, onPreview, onRestoreAsk,
+  item, projectId, onReload, onOpenItem, previewId, onPreview, onRestoreAsk,
 }: {
   item: ApiItem;
+  projectId?: string;
   onReload: () => void;
   onOpenItem?: (id: string) => void;
   previewId: string | null;
@@ -538,7 +553,7 @@ function VersionsPanel({
                  icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 3v5h5" /><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" /><path d="M12 7v5l3 3" /></svg>} />
       </div>
       {tab === 'versions' ? (
-        <VersionsTab item={item} onReload={onReload} onOpenItem={onOpenItem}
+        <VersionsTab item={item} projectId={projectId} onReload={onReload} onOpenItem={onOpenItem}
                      previewId={previewId} onPreview={onPreview} onRestoreAsk={onRestoreAsk} />
       ) : (
         <div className="grid place-items-center px-6 py-12 text-center text-[13px] text-slate-400">
@@ -560,9 +575,10 @@ function SideTab({ active, onClick, label, icon }: { active: boolean; onClick: (
 }
 
 function VersionsTab({
-  item, onReload, onOpenItem, previewId, onPreview, onRestoreAsk,
+  item, projectId, onReload, onOpenItem, previewId, onPreview, onRestoreAsk,
 }: {
   item: ApiItem;
+  projectId?: string;
   onReload: () => void;
   onOpenItem?: (id: string) => void;
   previewId: string | null;
@@ -615,6 +631,7 @@ function VersionsTab({
       {compareOpen && (
         <CompareDialog
           item={item}
+          projectId={projectId}
           versions={list}
           onClose={() => setCompareOpen(false)}
           onRestored={() => { setCompareOpen(false); void qc.invalidateQueries({ queryKey: ['versions', item.id] }); onReload(); }}

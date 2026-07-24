@@ -49,16 +49,31 @@ function pointTooltip(p: Point, currentTime: string): string {
 
 export function CompareDialog({
   item,
+  projectId,
   versions,
   onClose,
   onRestored,
 }: {
   item: ApiItem;
+  projectId?: string;
   versions: ItemVersion[];
   onClose: () => void;
   onRestored: () => void;
 }) {
   const qc = useQueryClient();
+
+  // Library files → id→thumbnail URL, so the file/asset field diffs as image
+  // thumbnails rather than bare names.
+  const filesQuery = useQuery({
+    queryKey: ['files', projectId],
+    queryFn: () => api.listFiles(projectId!),
+    enabled: !!projectId,
+  });
+  const fileUrls = useMemo(() => {
+    const m = new Map<string, string>();
+    (filesQuery.data ?? []).forEach((f) => { if (f.url) m.set(f.id, f.url); });
+    return m;
+  }, [filesQuery.data]);
 
   // Timeline points, oldest → newest, with Current appended at the far right.
   const points = useMemo<Point[]>(() => {
@@ -174,6 +189,7 @@ export function CompareDialog({
                       field={{ id: f.id, type: f.type, label: f.label, isPlainText: f.isPlainText, choices: f.choices }}
                       aValue={aResolve(f.id)}
                       bValue={bResolve(f.id)}
+                      fileUrls={fileUrls}
                     />
                   ))}
                 </section>
@@ -336,10 +352,17 @@ function VersionSlider({
 }
 
 /** One field diffed, with its own unified ⇄ split view toggle. */
-function FieldDiff({ field, aValue, bValue }: { field: DiffFieldMeta; aValue: unknown; bValue: unknown }) {
+function FieldDiff({
+  field, aValue, bValue, fileUrls,
+}: {
+  field: DiffFieldMeta;
+  aValue: unknown;
+  bValue: unknown;
+  fileUrls?: Map<string, string>;
+}) {
   const [view, setView] = useState<'unified' | 'split'>('unified');
-  const aHtml = fieldValueToHtml(field, aValue);
-  const bHtml = fieldValueToHtml(field, bValue);
+  const aHtml = fieldValueToHtml(field, aValue, fileUrls);
+  const bHtml = fieldValueToHtml(field, bValue, fileUrls);
   const changed = fieldChanged(aHtml, bHtml);
   const diffed = diffFieldHtml(aHtml, bHtml);
   return (
@@ -416,4 +439,10 @@ export const DIFF_CSS = `
 .cw-diff ins img { outline: 2px solid #22c55e; }
 .cw-diff del img { outline: 2px solid #ef4444; opacity: 0.7; }
 .cw-empty { color: #94a3b8; font-style: italic; }
+
+/* File/asset field diff — thumbnails laid out in a row. */
+.cw-diff .cw-file { display: inline-block; vertical-align: top; margin: 0 10px 10px 0; text-align: center; }
+.cw-diff .cw-file img { max-width: 140px; max-height: 140px; border: 1px solid #e2e8f0; border-radius: 4px; margin: 0; }
+.cw-diff .cw-file figcaption { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #64748b; }
+.cw-diff .cw-file-name { padding: 2px 0; }
 `;

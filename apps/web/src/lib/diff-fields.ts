@@ -64,8 +64,16 @@ function plainToHtml(s: string): string {
  * Render one field's stored value to the HTML we diff on. Rich text is already
  * HTML; everything else is wrapped so a change is visible (a checkbox toggled,
  * a file added, an image swapped).
+ *
+ * `fileUrls` (id → thumbnail URL) lets the file/asset field render actual image
+ * thumbnails in the diff instead of just names; without it (URLs not resolved) it
+ * falls back to the file name.
  */
-export function fieldValueToHtml(field: DiffFieldMeta, value: unknown): string {
+export function fieldValueToHtml(
+  field: DiffFieldMeta,
+  value: unknown,
+  fileUrls?: Map<string, string>,
+): string {
   switch (field.type) {
     case 'paragraph_text':
       // Rich body is stored as HTML already; a plain paragraph is text.
@@ -96,10 +104,17 @@ export function fieldValueToHtml(field: DiffFieldMeta, value: unknown): string {
     case 'file_image_upload': {
       const files = Array.isArray(value) ? (value as StoredFile[]) : [];
       if (!files.length) return '';
-      // The stored ref has no live URL, so list files by name — an added/removed
-      // file shows up in the diff. Inline images inside the rich body still render
-      // fully because those carry their own <img src>.
-      return `<ul>${files.map((f) => `<li>${escapeHtml(f.name)}</li>`).join('')}</ul>`;
+      // Show an image thumbnail when a URL is resolved (added/removed files then
+      // diff visually); fall back to the file name otherwise.
+      return files
+        .map((f) => {
+          const url = fileUrls?.get(f.id);
+          if (url && (f.mime ?? '').startsWith('image/')) {
+            return `<figure class="cw-file"><img src="${escapeAttr(url)}" alt="${escapeAttr(f.name)}"><figcaption>${escapeHtml(f.name)}</figcaption></figure>`;
+          }
+          return `<div class="cw-file cw-file-name">${escapeHtml(f.name)}</div>`;
+        })
+        .join('');
     }
 
     default:
