@@ -13,7 +13,7 @@
 .prose-editor ol { list-style: decimal; margin: .75rem 0; padding-left: 1.6rem; }
 .prose-editor li { margin: .3rem 0; }
 .prose-editor a  { color: #2563eb; text-decoration: underline; }
-.prose-editor img { max-width: 100%; height: auto; border-radius: .375rem; margin: 1rem 0; }
+.prose-editor img { max-width: 100%; height: auto; margin: 1rem 0; }
 /* Keyword highlight (CONTROLS › "Highlight in text"): green wash on matched text
    in the body; pink tags on the keyword list in the panel. Matching is literal
    and case-sensitive (see editor-keyword-highlight.ts). */
@@ -57,8 +57,11 @@
 .prose-editor figure.image.ProseMirror-selectednode,
 .prose-editor figure.image:focus-within { outline: 2px solid #4f9bf5; outline-offset: 2px; }
 .prose-editor blockquote {
-  border-left: 3px solid #cbd5e1; padding-left: 1rem; margin: 1rem 0; color: #475569;
+  border-left: 3px solid #cbd5e1; padding: .4rem 1rem; margin: 1rem 0; color: #475569;
 }
+/* Kill the inner paragraph's margins so they don't collapse out of the quote and
+   clip the nested block in show-blocks. */
+.prose-editor blockquote > p { margin: .25rem 0; }
 .prose-editor code {
   background: #f1f5f9; padding: .1rem .3rem; border-radius: .2rem; font-size: .9em;
 }
@@ -72,10 +75,17 @@
 .prose-editor .tableWrapper table { margin: 0; }
 .prose-editor table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 1rem 0; }
 .prose-editor th, .prose-editor td {
-  min-width: 2em; border: 1px solid #cbd5e1; padding: .5rem .75rem;
+  min-width: 2em;
+  /* Border width / colour and padding come from Table Properties via CSS vars set
+     on the <table> (which inherit down to the cells); these are the defaults. */
+  border: var(--cw-tbl-border, 1px) var(--cw-tbl-border-style, solid) var(--cw-tbl-border-color, #cbd5e1);
+  padding: var(--cw-tbl-cellpad, 3px 6px);
   vertical-align: top; position: relative; box-sizing: border-box;
 }
 .prose-editor th { background: #f8fafc; font-weight: 600; text-align: left; }
+/* Empty cells hold a paragraph; its default margins would make rows tall, so
+   drop them inside cells to get compact rows (~29px), matching the reference. */
+.prose-editor th > p, .prose-editor td > p { margin: 0; }
 /* The draggable column divider (prosemirror-tables inserts this on the cell). */
 .prose-editor .column-resize-handle {
   position: absolute; right: -2px; top: 0; bottom: 0; width: 4px;
@@ -134,6 +144,7 @@
 .prose-editor.show-blocks blockquote,
 .prose-editor.show-blocks ul,
 .prose-editor.show-blocks ol,
+.prose-editor.show-blocks figure.image,
 .prose-editor.show-blocks pre {
   outline: 1px dashed #cbd5e1;
   outline-offset: 3px;
@@ -147,6 +158,7 @@
 .prose-editor.show-blocks blockquote::before,
 .prose-editor.show-blocks ul::before,
 .prose-editor.show-blocks ol::before,
+.prose-editor.show-blocks figure.image::before,
 .prose-editor.show-blocks pre::before {
   position: absolute;
   top: -0.55rem;
@@ -168,4 +180,5 @@
 .prose-editor.show-blocks blockquote::before { content: 'blockquote'; }
 .prose-editor.show-blocks ul::before         { content: 'ul'; }
 .prose-editor.show-blocks ol::before         { content: 'ol'; }
+.prose-editor.show-blocks figure.image::before { content: 'FIGURE'; top: -0.15rem; z-index: 1; }
 .prose-editor.show-blocks pre::before        { content: 'pre'; }

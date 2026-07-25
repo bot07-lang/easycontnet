@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
 import { useEditor, EditorContent, BubbleMenu } from '@tiptap/react';
+import { NodeSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
@@ -76,7 +77,8 @@ import Subscript from '@tiptap/extension-subscript';
 import FontFamily from '@tiptap/extension-font-family';
 import { FontSize, LineHeight, Div, Indent } from './editor-extensions';
 import { Figure } from './editor-figure';
-import { FramedTable } from './editor-table';
+import { TableWithProps, type TableProps } from './editor-table-props';
+import { TablePropsDialog } from './TablePropsDialog';
 import { KeywordHighlight, keywordHighlightKey } from './editor-keyword-highlight';
 import { buildImageFrame } from './editor-image-resize';
 import { EditorToolbar } from './EditorToolbar';
@@ -134,6 +136,8 @@ export function RichTextField({
   const [busy, setBusy] = useState(false); // an upload (rotate/edit) is in flight
   const [editSrc, setEditSrc] = useState<string | null>(null); // Edit Image modal source
   const [imgDialog, setImgDialog] = useState<ImageValue | null>(null); // Insert/Edit Image
+  const [tableProps, setTableProps] = useState<TableProps | null>(null); // Table Properties
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null); // image right-click menu
 
   const editor = useEditor({
     extensions: [
@@ -141,7 +145,9 @@ export function RichTextField({
       Div,
       Underline,
       TitledLink.configure({ openOnClick: false, HTMLAttributes: { rel: 'noopener' } }),
-      SizedImage,
+      // inline:true so an image lives inside a paragraph and serialises as
+      // <p><img></p> — matching the reference (their image is an inline node).
+      SizedImage.configure({ inline: true }),
       Figure,
       // showOnlyCurrent:false so empty fields show the placeholder even when
       // not focused — otherwise an untouched field looks blank.
@@ -159,7 +165,7 @@ export function RichTextField({
       Superscript,
       Subscript,
       Highlight.configure({ multicolor: true }),
-      FramedTable.configure({ resizable: true }),
+      TableWithProps.configure({ resizable: true }),
       TableRow,
       TableHeader,
       TableCell,
@@ -190,12 +196,14 @@ export function RichTextField({
         }
         if (!data.url) return false;
         const imageType = view.state.schema.nodes.image;
-        if (!imageType) return false;
+        const paraType = view.state.schema.nodes.paragraph;
+        if (!imageType || !paraType) return false;
         event.preventDefault();
         const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? view.state.selection.from;
         // src = lightweight thumbnail; data-full-name = the original (full-size).
-        const node = imageType.create({ src: data.url, alt: data.name ?? '', dataFullName: data.fullName ?? null });
-        view.dispatch(view.state.tr.insert(at, node));
+        // The image is inline, so drop it inside its own paragraph → its own line.
+        const img = imageType.create({ src: data.url, alt: data.name ?? '', dataFullName: data.fullName ?? null });
+        view.dispatch(view.state.tr.insert(at, paraType.create(null, img)));
         return true;
       },
       // Paste an image from the clipboard (e.g. a screenshot): upload it as a
@@ -214,15 +222,34 @@ export function RichTextField({
             const lib = await uploadLibraryFile(pid, file, file.name || 'pasted-image.png');
             attach?.({ id: lib.id, name: lib.name, mime: lib.mime, sizeBytes: lib.sizeBytes });
             const imageType = view.state.schema.nodes.image;
-            if (imageType) {
-              const node = imageType.create({ src: lib.url ?? lib.fullUrl ?? '', alt: '', dataFullName: lib.fullUrl });
-              view.dispatch(view.state.tr.replaceSelectionWith(node));
+            const paraType = view.state.schema.nodes.paragraph;
+            if (imageType && paraType) {
+              const img = imageType.create({ src: lib.url ?? lib.fullUrl ?? '', alt: '', dataFullName: lib.fullUrl });
+              // Inline image in its own paragraph → its own line, not inline with text.
+              view.dispatch(view.state.tr.replaceSelectionWith(paraType.create(null, img)));
             }
           } catch {
             /* nothing inserted on failure */
           }
         })();
         return true;
+      },
+      // Right-click an image → a small "Image… / Edit image" menu (the reference's
+      // context menu). Selects the image first so both actions target it.
+      handleDOMEvents: {
+        contextmenu: (view, event) => {
+          const target = event.target as HTMLElement | null;
+          if (!target || target.tagName !== 'IMG' || !view.dom.contains(target)) return false;
+          event.preventDefault();
+          try {
+            const pos = view.posAtDOM(target, 0);
+            view.dispatch(view.state.tr.setSelection(NodeSelection.near(view.state.doc.resolve(pos))));
+          } catch {
+            /* leave selection as-is */
+          }
+          setCtxMenu({ x: event.clientX, y: event.clientY });
+          return true;
+        },
       },
     },
   });
@@ -345,6 +372,37 @@ export function RichTextField({
     setImgDialog(null);
   };
 
+  // Table properties: read the active table's attributes into the dialog, and
+  // apply the edited values back onto the table node.
+  const openTableProps = () => {
+    const a = editor.getAttributes('table');
+    setTableProps({
+      tblWidth: (a.tblWidth as string) ?? '100%',
+      tblHeight: (a.tblHeight as string) ?? '',
+      tblCellSpace: (a.tblCellSpace as string) ?? '',
+      tblCellPad: (a.tblCellPad as string) ?? '',
+      tblBorder: (a.tblBorder as string) ?? '1',
+      tblAlign: (a.tblAlign as string) ?? '',
+      tblBorderColor: (a.tblBorderColor as string) ?? '',
+      tblBorderStyle: (a.tblBorderStyle as string) ?? '',
+      tblBg: (a.tblBg as string) ?? '',
+    });
+  };
+  const applyTableProps = (v: TableProps) => {
+    editor.chain().focus().updateAttributes('table', {
+      tblWidth: v.tblWidth.trim() || null,
+      tblHeight: v.tblHeight.trim() || null,
+      tblCellSpace: v.tblCellSpace.trim() || null,
+      tblCellPad: v.tblCellPad.trim() || null,
+      tblBorder: v.tblBorder.trim() || null,
+      tblAlign: v.tblAlign || null,
+      tblBorderColor: v.tblBorderColor.trim() || null,
+      tblBorderStyle: v.tblBorderStyle || null,
+      tblBg: v.tblBg.trim() || null,
+    }).run();
+    setTableProps(null);
+  };
+
   // Toolbar is always visible on rich fields. Focus-based show/hide proved
   // fragile under React StrictMode (the editor is torn down and rebuilt, so
   // focus listeners land on stale instances); a persistent toolbar is the
@@ -388,6 +446,45 @@ export function RichTextField({
         </div>
       </BubbleMenu>
 
+      {/* Floating table toolbar (shown while the cursor is in a table): table
+          properties · delete table · insert/delete row · insert/delete column —
+          matching the reference. Every action is a built-in Tiptap command. */}
+      <BubbleMenu
+        editor={editor}
+        pluginKey={`table-bubble-${bubbleKey}`}
+        shouldShow={({ editor }) => editor.isActive('table')}
+        tippyOptions={{ placement: 'top', zIndex: 40 }}
+      >
+        <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+          <ImgBtn title="Table properties" onClick={openTableProps}>
+            <rect x="3" y="3" width="18" height="18" rx="1.5" /><path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
+          </ImgBtn>
+          <ImgBtn title="Delete table" onClick={() => editor.chain().focus().deleteTable().run()}>
+            <rect x="3" y="3" width="18" height="18" rx="1.5" /><path d="m8.5 8.5 7 7m0-7-7 7" />
+          </ImgBtn>
+          <span className="mx-1 h-6 w-px bg-slate-200" />
+          <ImgBtn title="Insert row above" onClick={() => editor.chain().focus().addRowBefore().run()}>
+            <rect x="4" y="13" width="16" height="8" rx="1.5" /><path d="M12 10V3m-3 3 3-3 3 3" />
+          </ImgBtn>
+          <ImgBtn title="Insert row below" onClick={() => editor.chain().focus().addRowAfter().run()}>
+            <rect x="4" y="3" width="16" height="8" rx="1.5" /><path d="M12 14v7m-3-3 3 3 3-3" />
+          </ImgBtn>
+          <ImgBtn title="Delete row" onClick={() => editor.chain().focus().deleteRow().run()}>
+            <rect x="4" y="8" width="16" height="8" rx="1.5" /><path d="m10 10 4 4m0-4-4 4" />
+          </ImgBtn>
+          <span className="mx-1 h-6 w-px bg-slate-200" />
+          <ImgBtn title="Insert column left" onClick={() => editor.chain().focus().addColumnBefore().run()}>
+            <rect x="13" y="4" width="8" height="16" rx="1.5" /><path d="M10 12H3m3-3-3 3 3 3" />
+          </ImgBtn>
+          <ImgBtn title="Insert column right" onClick={() => editor.chain().focus().addColumnAfter().run()}>
+            <rect x="3" y="4" width="8" height="16" rx="1.5" /><path d="M14 12h7m-3-3 3 3-3 3" />
+          </ImgBtn>
+          <ImgBtn title="Delete column" onClick={() => editor.chain().focus().deleteColumn().run()}>
+            <rect x="8" y="4" width="8" height="16" rx="1.5" /><path d="m10 10 4 4m0-4-4 4" />
+          </ImgBtn>
+        </div>
+      </BubbleMenu>
+
       <div className={`rt-body ${fullscreen ? 'flex-1 overflow-y-auto' : ''}`}>
         <EditorContent editor={editor} />
       </div>
@@ -395,6 +492,33 @@ export function RichTextField({
       {/* Insert/Edit Image — editing the selected image's src/alt/size. */}
       {imgDialog && (
         <ImageDialog initial={imgDialog} onClose={() => setImgDialog(null)} onSave={applyImgDialog} onUpload={uploadForDialog} />
+      )}
+
+      {/* Table Properties — width/height/border/padding/spacing/alignment/colours. */}
+      {tableProps && (
+        <TablePropsDialog initial={tableProps} onClose={() => setTableProps(null)} onSave={applyTableProps} />
+      )}
+
+      {/* Image right-click menu: Image… (Insert/Edit dialog) · Edit image (editor). */}
+      {ctxMenu && (
+        <>
+          <div className="fixed inset-0 z-[55]" onClick={() => setCtxMenu(null)}
+               onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }} />
+          <div className="fixed z-[56] w-44 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl"
+               style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+            <button type="button" onClick={() => { setCtxMenu(null); openImgDialog(); }}
+                    className="flex w-full items-center gap-3 px-4 py-2 text-left text-[14px] text-slate-700 hover:bg-slate-50">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" /></svg>
+              Image…
+            </button>
+            <button type="button" disabled={!projectId}
+                    onClick={() => { setCtxMenu(null); setEditSrc(imageSource()); }}
+                    className="flex w-full items-center gap-3 px-4 py-2 text-left text-[14px] text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="m8 13 2.5-3 3 4 2-2.5L21 17" /><circle cx="8.5" cy="8.5" r="1.5" /></svg>
+              Edit image
+            </button>
+          </div>
+        </>
       )}
 
       {/* Edit Image (filerobot) — lazy; on save uploads a new file and repoints. */}

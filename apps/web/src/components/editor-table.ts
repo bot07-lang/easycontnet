@@ -19,9 +19,23 @@ const CORNERS: Corner[] = ['nw', 'ne', 'sw', 'se'];
 class FramedTableView extends TableView {
   // Ignore DOM mutations inside our frame so ProseMirror doesn't redraw the
   // node view (which would drop the handles) while we tweak handle/col styles.
+  // The frame overlay, the wrapper's own class (cw-table-wrap / cw-table-active),
+  // and the handles are decorations — NONE of them are document content, so none
+  // may trigger a redraw. Missing any of these makes ProseMirror recreate the node
+  // view on the mutation we just caused, which re-adds the frame → infinite loop
+  // (a full page freeze).
   override ignoreMutation(record: MutationRecord): boolean {
     const target = record.target as HTMLElement | null;
+    // Attribute changes on the wrapper itself (e.g. the active-class toggle).
+    if (record.type === 'attributes' && target === this.dom) return true;
+    // Anything inside the frame overlay.
     if (target && typeof target.closest === 'function' && target.closest('.cw-table-frame')) return true;
+    // The frame being added to / removed from the wrapper.
+    if (record.type === 'childList') {
+      const isFrame = (n: Node) =>
+        n instanceof HTMLElement && (n.classList?.contains('cw-table-frame') || !!n.closest?.('.cw-table-frame'));
+      if (Array.from(record.addedNodes).some(isFrame) || Array.from(record.removedNodes).some(isFrame)) return true;
+    }
     return super.ignoreMutation(record);
   }
 }

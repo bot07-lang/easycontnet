@@ -176,7 +176,7 @@ export function CompareDialog({
         ) : loading ? (
           <p className="mx-auto max-w-3xl text-center text-sm text-slate-400">Loading versions…</p>
         ) : (
-          <div className="mx-auto max-w-5xl space-y-6">
+          <div className="mx-auto w-full max-w-[1800px] space-y-6 px-6">
             {item.tabs.map((t) => {
               const fields = t.fields.filter((f) => isDiffableField(f.type));
               if (!fields.length) return null;
@@ -388,8 +388,8 @@ function FieldDiff({
         // Each side renders its OWN raw HTML — old (as it was) | new (as it is) —
         // so formatting/colour changes show by the sides differing, no overlay.
         <div className="grid grid-cols-2 divide-x divide-slate-200">
-          <div className="cw-diff px-5 py-4" dangerouslySetInnerHTML={{ __html: aHtml || '<span class="cw-empty">Empty</span>' }} />
-          <div className="cw-diff px-5 py-4" dangerouslySetInnerHTML={{ __html: bHtml || '<span class="cw-empty">Empty</span>' }} />
+          <div className="cw-diff min-w-0 overflow-x-auto px-5 py-4" dangerouslySetInnerHTML={{ __html: aHtml || '<span class="cw-empty">Empty</span>' }} />
+          <div className="cw-diff min-w-0 overflow-x-auto px-5 py-4" dangerouslySetInnerHTML={{ __html: bHtml || '<span class="cw-empty">Empty</span>' }} />
         </div>
       ) : (
         // Unified: one combined block with htmldiff's inline del (red) + ins (green).
@@ -412,7 +412,10 @@ export const DIFF_CSS = `
 .cw-diff ol { list-style: decimal; padding-left: 1.4em; margin: 0.4em 0; }
 .cw-diff a { color: #2563eb; text-decoration: underline; }
 .cw-diff img { max-width: 100%; height: auto; border-radius: 4px; margin: 0.3em 0; }
-.cw-diff table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+/* Videos/embeds and wide tables must stay inside their (split) column, not
+   overflow into the other side. */
+.cw-diff iframe, .cw-diff video { max-width: 100%; }
+.cw-diff table { border-collapse: collapse; width: 100%; margin: 0.5em 0; display: block; overflow-x: auto; }
 .cw-diff td, .cw-diff th { border: 1px solid #cbd5e1; padding: 6px 10px; }
 .cw-diff pre { background: #f1f5f9; padding: 0.6em; border-radius: 6px; overflow-x: auto; }
 .cw-diff code { background: #f1f5f9; padding: 0.1em 0.3em; border-radius: 4px; }

@@ -636,6 +636,7 @@ function VersionsPanel({
       ) : tab === 'controls' ? (
         <ControlsTab
           item={item}
+          projectId={projectId}
           onReload={onReload}
           onOpenTemplate={onOpenTemplate}
           highlightKeywords={highlightKeywords}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { ContentList } from './ContentNavPanel';
 
 export type NavKey =
   | 'dashboard'
@@ -21,7 +22,7 @@ export const IMPLEMENTED: Record<NavKey, boolean> = {
   documentation: false,
   workflow: true,
   templates: true,
-  categories: false,
+  categories: true,
 };
 
 const MAIN: { key: NavKey; label: string; icon: React.ReactNode }[] = [
@@ -41,15 +42,19 @@ const CONFIG: { key: NavKey; label: string; icon: React.ReactNode }[] = [
 export function Sidebar({
   selectedProjectId,
   activeNav,
+  itemId,
   onAllProjects,
   onSelectProject,
   onNavigate,
+  onOpenItem,
 }: {
   selectedProjectId: string | null;
   activeNav: NavKey | null;
+  itemId?: string | null;
   onAllProjects: () => void;
   onSelectProject: (id: string) => void;
   onNavigate: (key: NavKey) => void;
+  onOpenItem?: (id: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
@@ -94,10 +99,21 @@ export function Sidebar({
 
       {/* Project-scoped nav */}
       <nav className={`flex-1 overflow-y-auto px-2 ${selectedProjectId ? '' : 'pointer-events-none opacity-40'} `.trim()}>
-        {MAIN.map((item) => (
-          <NavItem key={item.key} item={item} active={activeNav === item.key}
-                   onClick={() => onNavigate(item.key)} />
-        ))}
+        {MAIN.map((item) =>
+          item.key === 'content' ? (
+            <div key={item.key}>
+              <NavItem item={item} active={activeNav === item.key}
+                       chevron chevronOpen={activeNav === 'content'}
+                       onClick={() => onNavigate(item.key)} />
+              {activeNav === 'content' && selectedProjectId && onOpenItem && (
+                <ContentList projectId={selectedProjectId} currentId={itemId ?? null} onOpenItem={onOpenItem} />
+              )}
+            </div>
+          ) : (
+            <NavItem key={item.key} item={item} active={activeNav === item.key}
+                     onClick={() => onNavigate(item.key)} />
+          ),
+        )}
 
         <p className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
           Configuration
@@ -112,11 +128,13 @@ export function Sidebar({
 }
 
 function NavItem({
-  item, active, onClick,
+  item, active, onClick, chevron, chevronOpen,
 }: {
   item: { key: NavKey; label: string; icon: React.ReactNode };
   active: boolean;
   onClick: () => void;
+  chevron?: boolean;
+  chevronOpen?: boolean;
 }) {
   const implemented = IMPLEMENTED[item.key];
   return (
@@ -129,7 +147,11 @@ function NavItem({
         ${implemented ? '' : 'text-slate-400'}`}
     >
       <span className="shrink-0">{item.icon}</span>
-      {item.label}
+      <span className="flex-1">{item.label}</span>
+      {chevron && (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
+             className={`shrink-0 text-slate-400 transition ${chevronOpen ? '' : '-rotate-90'}`}><path d="m6 9 6 6 6-6" /></svg>
+      )}
     </button>
   );
 }

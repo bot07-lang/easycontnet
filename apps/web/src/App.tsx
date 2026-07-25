@@ -16,6 +16,7 @@ const ItemEditor = lazy(() => import('./components/ItemEditor').then((m) => ({ d
 const WorkflowSettings = lazy(() => import('./components/WorkflowSettings').then((m) => ({ default: m.WorkflowSettings })));
 const TemplatesGrid = lazy(() => import('./components/TemplatesGrid').then((m) => ({ default: m.TemplatesGrid })));
 const TemplateBuilder = lazy(() => import('./components/TemplateBuilder').then((m) => ({ default: m.TemplateBuilder })));
+const CategoriesPage = lazy(() => import('./components/CategoriesPage').then((m) => ({ default: m.CategoriesPage })));
 
 function LazyFallback() {
   return <p className="p-8 text-sm text-slate-400">Loading…</p>;
@@ -135,9 +136,11 @@ function Workspace() {
       <Sidebar
         selectedProjectId={projectId}
         activeNav={showAll ? null : nav}
+        itemId={itemId}
         onAllProjects={() => { setShowAll(true); setItemId(null); }}
         onSelectProject={selectProject}
         onNavigate={(key) => { setShowAll(false); setNav(key); setItemId(null); }}
+        onOpenItem={(id) => { setShowAll(false); setNav('content'); setItemId(id); }}
       />
 
       <div className="min-w-0 flex-1 overflow-y-auto bg-slate-100">
@@ -179,6 +182,16 @@ function ProjectView({
       <div className="h-full overflow-y-auto p-6">
         <Suspense fallback={<LazyFallback />}>
           <WorkflowSettings projectId={projectId} />
+        </Suspense>
+      </div>
+    );
+  }
+
+  if (nav === 'categories') {
+    return (
+      <div className="h-full overflow-y-auto p-6">
+        <Suspense fallback={<LazyFallback />}>
+          <CategoriesPage projectId={projectId} />
         </Suspense>
       </div>
     );

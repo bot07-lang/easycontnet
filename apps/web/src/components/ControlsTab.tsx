@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ApiItem, type AssignmentStatus } from '../lib/api';
+import { getItemCategories, setItemCategories, getProjectCategories } from '../lib/categories-store';
 
 /**
  * The CONTROLS tab of the item editor's right rail — ITEM DETAILS + WORKFLOW,
@@ -30,9 +31,10 @@ function countOccurrences(text: string, kw: string): number {
 }
 
 export function ControlsTab({
-  item, onReload, onOpenTemplate, highlightKeywords, onSetHighlight, mainContentText,
+  item, projectId, onReload, onOpenTemplate, highlightKeywords, onSetHighlight, mainContentText,
 }: {
   item: ApiItem;
+  projectId?: string;
   onReload: () => void;
   onOpenTemplate?: (templateId: string) => void;
   highlightKeywords: string[];
@@ -84,19 +86,20 @@ export function ControlsTab({
   const highlightOn = highlightKeywords.length > 0;
   const toggleHighlight = () => onSetHighlight(highlightOn ? [] : item.keywords);
 
-  // Categories — FRONTEND ONLY for now (local state, not yet persisted). Type a
-  // name + Enter/comma to add a chip; backend wiring comes later.
-  const [categories, setCategories] = useState<string[]>([]);
+  // Categories — assign the project's categories (defined on the Categories page)
+  // to this item. Frontend-only for now (localStorage store, shared with that page).
+  const [categories, setCategories] = useState<string[]>(() => getItemCategories(item.id));
   const [catEditing, setCatEditing] = useState(false);
   const [catDraft, setCatDraft] = useState<string[]>([]);
-  const [catInput, setCatInput] = useState('');
-  const startCatEdit = () => { setCatDraft(categories); setCatInput(''); setCatEditing(true); };
-  const addCat = (raw: string) => {
-    const v = raw.trim();
-    if (v && !catDraft.includes(v)) setCatDraft((c) => [...c, v]);
-    setCatInput('');
+  const [projectCats, setProjectCats] = useState<string[]>([]);
+  const startCatEdit = () => {
+    setProjectCats(projectId ? getProjectCategories(projectId) : []);
+    setCatDraft(categories);
+    setCatEditing(true);
   };
-  const removeCat = (c: string) => setCatDraft((d) => d.filter((x) => x !== c));
+  const toggleCat = (c: string) => setCatDraft((d) => (d.includes(c) ? d.filter((x) => x !== c) : [...d, c]));
+  const catChanged = JSON.stringify([...catDraft].sort()) !== JSON.stringify([...categories].sort());
+  const saveCat = () => { setItemCategories(item.id, catDraft); setCategories(catDraft); setCatEditing(false); };
 
   return (
     <div className="text-[14px]">
@@ -145,7 +148,9 @@ export function ControlsTab({
                   <path d="M20.6 13.4 12 22l-9-9V4a1 1 0 0 1 1-1h8.6l8 8a1 1 0 0 1 0 2.4z" /><circle cx="7.5" cy="7.5" r="1" />
                 </svg>
                 Categories
-                {!catEditing && (
+                {catEditing ? (
+                  <button type="button" onClick={() => setCatDraft([])} className="text-[15px] font-medium text-blue-600 hover:underline">(Clear)</button>
+                ) : (
                   <button type="button" onClick={startCatEdit} className="text-blue-600 hover:text-blue-700" title="Edit categories">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
                   </button>
@@ -155,34 +160,27 @@ export function ControlsTab({
               {catEditing ? (
                 <div>
                   <div className="min-h-[150px] rounded-lg border border-slate-300 p-2">
-                    <div className="flex flex-wrap gap-1.5">
-                      {catDraft.map((c) => (
-                        <span key={c} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[13px] text-blue-700">
-                          {c}
-                          <button type="button" onClick={() => removeCat(c)} className="text-blue-400 hover:text-blue-600" aria-label={`Remove ${c}`}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                    <p className="mb-1 px-1 text-[14px] text-slate-400">Select category</p>
+                    {projectCats.length === 0 ? (
+                      <p className="px-1 py-2 text-[13px] text-slate-400">No categories in this project yet — add them in Categories settings.</p>
+                    ) : (
+                      <div className="max-h-[180px] space-y-0.5 overflow-y-auto">
+                        {projectCats.map((c) => (
+                          <button key={c} type="button" onClick={() => toggleCat(c)}
+                                  className={`block w-full rounded px-2 py-1.5 text-left text-[14px] ${catDraft.includes(c) ? 'bg-slate-200 text-slate-900' : 'text-slate-800 hover:bg-slate-50'}`}>
+                            {c}
                           </button>
-                        </span>
-                      ))}
-                      <input
-                        value={catInput}
-                        onChange={(e) => setCatInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addCat(catInput); }
-                          else if (e.key === 'Backspace' && !catInput && catDraft.length) removeCat(catDraft[catDraft.length - 1]!);
-                        }}
-                        placeholder={catDraft.length ? '' : 'Select category'}
-                        className="min-w-[120px] flex-1 bg-transparent px-1 py-1 text-[14px] text-slate-800 placeholder:text-slate-400 focus:outline-none"
-                      />
-                    </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="mt-3 flex justify-end gap-3">
                     <button type="button" onClick={() => setCatEditing(false)}
                             className="rounded border border-slate-300 px-5 py-2 text-[13px] font-semibold uppercase tracking-wide text-slate-700 hover:bg-slate-50">
                       Cancel
                     </button>
-                    <button type="button" onClick={() => { setCategories(catDraft); setCatEditing(false); }}
-                            className="rounded bg-green-600 px-6 py-2 text-[13px] font-semibold uppercase tracking-wide text-white hover:bg-green-700">
+                    <button type="button" onClick={saveCat} disabled={!catChanged}
+                            className="rounded bg-green-600 px-6 py-2 text-[13px] font-semibold uppercase tracking-wide text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-40">
                       Save
                     </button>
                   </div>

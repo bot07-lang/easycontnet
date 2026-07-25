@@ -1,7 +1,9 @@
 import type { Editor } from '@tiptap/react';
+import { getMarkRange } from '@tiptap/core';
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { BlockTypeMenu, ColorPalette } from './toolbar-parts';
 import { ImageDialog, type ImageValue } from './ImageDialog';
+import { ColorPickerDialog } from './ColorPickerDialog';
 import { TableMenu } from './TableMenu';
 import { LinkDialog, type LinkValues } from './LinkDialog';
 import { MediaDialog } from './MediaDialog';
@@ -228,6 +230,35 @@ export function EditorToolbar({
     setSpecialOpen(false);
   };
 
+  // Clear formatting. With a real selection, strip everything in it (marks, block
+  // type, alignment, line-height, font size). With just a cursor, clear ONLY the
+  // formatted run under it (the mark range) — not the whole line.
+  const clearFormat = () => {
+    const sel = editor.state.selection;
+    if (sel.empty) {
+      const $pos = sel.$from;
+      const marks = $pos.marks();
+      if (!marks.length) return; // nothing formatted at the cursor
+      let from = $pos.pos;
+      let to = $pos.pos;
+      for (const m of marks) {
+        const range = getMarkRange($pos, m.type);
+        if (range) { from = Math.min(from, range.from); to = Math.max(to, range.to); }
+      }
+      if (from === to) return;
+      editor.chain().focus().setTextSelection({ from, to }).unsetAllMarks().unsetFontSize().run();
+      return;
+    }
+    editor.chain().focus().unsetAllMarks().clearNodes().unsetTextAlign().unsetLineHeight().unsetFontSize().run();
+  };
+
+  // Custom-colour picker — our own modal dialog (ColorPickerDialog), not the
+  // browser/OS colour popup, so it can't be dismissed by the hover colour menu
+  // closing. openCustomColor closes the menu and remembers which command applies
+  // the chosen colour.
+  const [colorPicker, setColorPicker] = useState<{ apply: (c: string) => void } | null>(null);
+  const openCustomColor = (apply: (c: string) => void) => { close(); setColorPicker({ apply }); };
+
   // Edit menu clipboard actions. Cut/Copy work off the current DOM selection;
   // Paste reads the clipboard (a user gesture, so the browser allows it).
   const cut = () => { document.execCommand('cut'); };
@@ -292,10 +323,16 @@ export function EditorToolbar({
       height: v.height || null,
       dataFullName: v.fullSrc || null,
     };
+    // The image is an inline node; wrap it in its own paragraph so it lands on a
+    // new line below the current text (matching the reference), not inline with it.
     editor
       .chain()
       .focus()
-      .insertContent(v.showCaption ? { type: 'figure', attrs, content: [{ type: 'text', text: 'Caption' }] } : { type: 'image', attrs })
+      .insertContent(
+        v.showCaption
+          ? { type: 'figure', attrs, content: [{ type: 'text', text: 'Caption' }] }
+          : { type: 'paragraph', content: [{ type: 'image', attrs }] },
+      )
       .run();
     setImageOpen(false);
   };
@@ -308,6 +345,12 @@ export function EditorToolbar({
     <div className="border-b border-slate-200 bg-slate-50">
       {imageOpen && (
         <ImageDialog onClose={() => setImageOpen(false)} onSave={insertImage} onUpload={onUpload} />
+      )}
+      {/* Custom colour picker dialog (opened from the menu colour grids). */}
+      {colorPicker && (
+        <ColorPickerDialog initial="#000000"
+                           onClose={() => setColorPicker(null)}
+                           onSave={(c) => { colorPicker.apply(c); setColorPicker(null); }} />
       )}
       {/* Menu bar */}
       <div ref={menuBarRef} className="flex items-center gap-1 border-b border-slate-200 px-2 py-1.5">
@@ -413,7 +456,7 @@ export function EditorToolbar({
                   onClick={() => { close(); editor.chain().focus().toggleCode().run(); }} />
                 <MenuSep />
 
-                <Sub label="Formats" width="w-44">
+                <Sub label="Formats" width="w-44" scroll={false}>
                   <Sub label="Headings" width="w-44">
                     {([1, 2, 3, 4, 5, 6] as const).map((lvl) => (
                       <MenuItem key={lvl}
@@ -486,15 +529,17 @@ export function EditorToolbar({
                 <MenuSep />
                 <Sub label="Text color" icon={I.colorA} width="w-[248px]">
                   <ColorGrid onPick={(c) => { close(); editor.chain().focus().setColor(c).run(); }}
-                             onClear={() => { close(); editor.chain().focus().unsetColor().run(); }} />
+                             onClear={() => { close(); editor.chain().focus().unsetColor().run(); }}
+                             onCustom={() => openCustomColor((c) => { close(); editor.chain().focus().setColor(c).run(); })} />
                 </Sub>
                 <Sub label="Background color" icon={I.highlighter} width="w-[248px]">
                   <ColorGrid onPick={(c) => { close(); editor.chain().focus().setHighlight({ color: c }).run(); }}
-                             onClear={() => { close(); editor.chain().focus().unsetHighlight().run(); }} />
+                             onClear={() => { close(); editor.chain().focus().unsetHighlight().run(); }}
+                             onCustom={() => openCustomColor((c) => { close(); editor.chain().focus().setHighlight({ color: c }).run(); })} />
                 </Sub>
                 <MenuSep />
                 <MenuItem icon={I.eraser} label="Clear formatting"
-                  onClick={() => { close(); editor.chain().focus().unsetAllMarks().clearNodes().run(); }} />
+                  onClick={() => { close(); clearFormat(); }} />
               </Dropdown>
             )}
             {m === 'Tools' && openMenu === 'Tools' && (
@@ -593,6 +638,7 @@ export function EditorToolbar({
           current={textColor}
           onPick={(c) => editor.chain().focus().setColor(c).run()}
           onClear={() => editor.chain().focus().unsetColor().run()}
+          onCustom={() => openCustomColor((c) => editor.chain().focus().setColor(c).run())}
           swatch={
             <span className="grid place-items-center leading-none">
               <span className="text-[14px] font-semibold">A</span>
@@ -607,6 +653,7 @@ export function EditorToolbar({
           current={highlight}
           onPick={(c) => editor.chain().focus().setHighlight({ color: c }).run()}
           onClear={() => editor.chain().focus().unsetHighlight().run()}
+          onCustom={() => openCustomColor((c) => editor.chain().focus().setHighlight({ color: c }).run())}
           swatch={
             <span className="grid place-items-center leading-none">
               {/* Highlighter pen only — no built-in bar, since the coloured
@@ -621,7 +668,7 @@ export function EditorToolbar({
         />
 
         <Btn title="Clear formatting — removes bold, italic, colour and headings"
-             onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}>
+             onClick={clearFormat}>
           <Icon>{I.eraser}</Icon>
         </Btn>
         <Divider />
@@ -765,12 +812,15 @@ function MenuItem({
 /** A menu row that reveals a flyout submenu to the right on hover. Composes to
  *  any depth (Format › Formats › Headings). */
 function Sub({
-  label, icon, glyph, width = 'w-48', children,
+  label, icon, glyph, width = 'w-48', scroll = true, children,
 }: {
   label: string;
   icon?: React.ReactNode;
   glyph?: React.ReactNode;
   width?: string;
+  // Scroll long leaf lists; MUST be false when the panel holds nested submenus,
+  // since overflow-y:auto also clips overflow-x, cutting off the pop-out children.
+  scroll?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -784,7 +834,7 @@ function Sub({
         <span className="text-slate-400">›</span>
       </div>
       {open && (
-        <div className={`absolute left-full top-0 z-40 -ml-1 max-h-[70vh] overflow-y-auto ${width} rounded-md border border-slate-200 bg-white py-1 shadow-xl`}>
+        <div className={`absolute left-full top-0 z-40 -ml-1 ${scroll ? 'max-h-[70vh] overflow-y-auto' : ''} ${width} rounded-md border border-slate-200 bg-white py-1 shadow-xl`}>
           {children}
         </div>
       )}
@@ -846,7 +896,7 @@ const PALETTE = [
 ];
 
 /** A compact swatch grid used by Format › Text color / Background color. */
-function ColorGrid({ onPick, onClear }: { onPick: (c: string) => void; onClear: () => void }) {
+function ColorGrid({ onPick, onClear, onCustom }: { onPick: (c: string) => void; onClear: () => void; onCustom: () => void }) {
   return (
     <div className="p-2">
       <div className="grid grid-cols-10 gap-1">
@@ -855,11 +905,21 @@ function ColorGrid({ onPick, onClear }: { onPick: (c: string) => void; onClear: 
                   className="h-5 w-5 rounded-[3px] border border-slate-300" style={{ background: c }} />
         ))}
       </div>
-      <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onClear}
-              className="mt-2 flex w-full items-center gap-2 rounded px-2 py-1.5 text-[13px] text-slate-600 hover:bg-slate-100">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-        Remove color
-      </button>
+      <div className="mt-2 flex items-center gap-1">
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onClear}
+                className="flex flex-1 items-center gap-2 rounded px-2 py-1.5 text-[13px] text-slate-600 hover:bg-slate-100">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          Remove color
+        </button>
+        {/* Custom colour — the native picker is rendered once at the toolbar root
+            (openCustomColor), so it survives this hover-menu closing. */}
+        <button type="button" title="Custom color" onMouseDown={(e) => e.preventDefault()} onClick={onCustom}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded text-slate-700 hover:bg-slate-100">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c.93 0 1.68-.75 1.68-1.68 0-.44-.17-.83-.44-1.13-.26-.29-.43-.68-.43-1.11 0-.93.75-1.68 1.68-1.68H16c3.31 0 6-2.69 6-6 0-4.96-4.49-9-10-9zM6.5 13c-.83 0-1.5-.67-1.5-1.5S5.67 10 6.5 10 8 10.67 8 11.5 7.33 13 6.5 13zm3-4C8.67 9 8 8.33 8 7.5S8.67 6 9.5 6s1.5.67 1.5 1.5S10.33 9 9.5 9zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 6 14.5 6s1.5.67 1.5 1.5S15.33 9 14.5 9zm3 4c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }

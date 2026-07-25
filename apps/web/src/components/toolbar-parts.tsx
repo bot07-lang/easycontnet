@@ -49,11 +49,12 @@ function useClickAway(onAway: () => void) {
 }
 
 export function ColorPalette({
-  current, onPick, onClear, title, swatch,
+  current, onPick, onClear, onCustom, title, swatch,
 }: {
   current?: string;
   onPick: (hex: string) => void;
   onClear: () => void;
+  onCustom?: () => void;
   title: string;
   swatch: React.ReactNode;
 }) {
@@ -115,19 +116,17 @@ export function ColorPalette({
               </svg>
             </button>
 
-            <label
+            <button
+              type="button"
               title="Custom colour"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setOpen(false); onCustom?.(); }}
               className="grid h-9 w-9 cursor-pointer place-items-center hover:bg-slate-50"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 22a1 1 0 0 1 0-2 1.5 1.5 0 0 0 0-3H9.5a5.5 5.5 0 0 1 0-11H12a10 10 0 0 1 0 20zM7.5 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm3-4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm5 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zm2.5 4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
               </svg>
-              <input
-                type="color"
-                className="sr-only"
-                onChange={(e) => { onPick(e.target.value); setOpen(false); }}
-              />
-            </label>
+            </button>
           </div>
         </div>
       )}
