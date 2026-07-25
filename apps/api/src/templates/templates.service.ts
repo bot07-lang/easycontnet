@@ -21,7 +21,7 @@ export class TemplatesService {
   async listTemplates(user: UserContext, projectId: string) {
     return this.db.withUser(user, async (c) => {
       const { rows } = await c.query(
-        `select t.id, t.name, t.is_default, t.updated_at,
+        `select t.id, t.name, t.description, t.is_default, t.updated_at,
                 (select count(*) from public.template_tabs tb where tb.template_id = t.id) as tab_count,
                 (select count(*) from public.template_fields f
                    join public.template_tabs tb on tb.id = f.tab_id
@@ -35,6 +35,7 @@ export class TemplatesService {
       return rows.map((r) => ({
         id: r.id as string,
         name: r.name as string,
+        description: (r.description as string | null) ?? null,
         is_default: r.is_default as boolean,
         updated_at: r.updated_at as string,
         tab_count: Number(r.tab_count),
@@ -48,7 +49,7 @@ export class TemplatesService {
   async getTemplate(user: UserContext, templateId: string) {
     return this.db.withUser(user, async (c) => {
       const t = (
-        await c.query(`select id, project_id, name, is_default from public.templates where id = $1`, [
+        await c.query(`select id, project_id, name, description, is_default from public.templates where id = $1`, [
           templateId,
         ])
       ).rows[0];
@@ -79,6 +80,7 @@ export class TemplatesService {
         id: t.id as string,
         projectId: t.project_id as string,
         name: t.name as string,
+        description: (t.description as string | null) ?? null,
         isDefault: t.is_default as boolean,
         tabs: tabs.map((tb) => ({
           id: tb.id as string,
@@ -113,7 +115,7 @@ export class TemplatesService {
    * Title and a Content field — the minimum a content item needs, matching item
    * auto-provisioning. The first template in a project becomes the default.
    */
-  async createTemplate(user: UserContext, projectId: string, name: string) {
+  async createTemplate(user: UserContext, projectId: string, name: string, description?: string | null) {
     try {
       return await this.db.withUser(user, async (c) => {
         const count = Number(
@@ -123,9 +125,9 @@ export class TemplatesService {
 
         const templateId = (
           await c.query(
-            `insert into public.templates (org_id, project_id, name, is_default)
-             values ($1, $2, $3, $4) returning id`,
-            [user.orgId, projectId, name.trim(), count === 0],
+            `insert into public.templates (org_id, project_id, name, description, is_default)
+             values ($1, $2, $3, $4, $5) returning id`,
+            [user.orgId, projectId, name.trim(), description?.trim() || null, count === 0],
           )
         ).rows[0].id as string;
 
@@ -250,7 +252,7 @@ export class TemplatesService {
   }
 
   /** Rename and/or set-as-default. Setting default clears the others in the project. */
-  async updateTemplate(user: UserContext, templateId: string, patch: { name?: string; isDefault?: boolean }) {
+  async updateTemplate(user: UserContext, templateId: string, patch: { name?: string; description?: string | null; isDefault?: boolean }) {
     try {
       return await this.db.withUser(user, async (c) => {
         const t = (
@@ -260,6 +262,9 @@ export class TemplatesService {
 
         if (patch.name !== undefined) {
           await c.query(`update public.templates set name = $1 where id = $2`, [patch.name.trim(), templateId]);
+        }
+        if (patch.description !== undefined) {
+          await c.query(`update public.templates set description = $1 where id = $2`, [patch.description?.trim() || null, templateId]);
         }
         if (patch.isDefault === true) {
           await c.query(`update public.templates set is_default = (id = $1) where project_id = $2`, [

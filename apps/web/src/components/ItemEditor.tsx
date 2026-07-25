@@ -268,10 +268,19 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
     (previewFiles.data ?? []).forEach((f) => { if (f.url) m.set(f.id, f.url); });
     return m;
   }, [previewFiles.data]);
+  // "Save version" flashes ✓ Saved for a couple of seconds, then reverts.
+  const [savedFlash, setSavedFlash] = useState(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const saveVersion = useMutation({
     mutationFn: () => api.saveVersion(item.id),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['versions', item.id] }); },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['versions', item.id] });
+      setSavedFlash(true);
+      clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSavedFlash(false), 2500);
+    },
   });
+  useEffect(() => () => clearTimeout(savedTimer.current), []);
   const restore = useMutation({
     mutationFn: (vid: string) => api.restoreVersion(item.id, vid),
     onSuccess: async () => {
@@ -373,14 +382,6 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
     return () => window.removeEventListener('beforeunload', warn);
   }, []);
 
-  const totalWords = useMemo(
-    () =>
-      Object.values(values).reduce<number>((n, v) => {
-        const s = toPlainText(v).trim();
-        return n + (s ? s.split(/\s+/).length : 0);
-      }, 0),
-    [values],
-  );
 
   return (
     <div className="flex items-start gap-4">
@@ -404,8 +405,8 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
         {item.templateId && onOpenTemplate && (
           <button type="button" onClick={() => onOpenTemplate(item.templateId!)} title="Open template"
                   className="mb-1 ml-1 grid h-8 w-8 shrink-0 place-items-center self-center rounded text-slate-500 hover:bg-slate-200 hover:text-slate-700">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15H4.5a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 6 8.6l-.06-.06A2 2 0 1 1 8.77 5.7l.06.06A1.65 1.65 0 0 0 12 4.6V4.5a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 19.4 8.6l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 21.4 15" />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
             </svg>
           </button>
         )}
@@ -433,12 +434,20 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
             busy={changeStatus.isPending}
             onChange={(id) => changeStatus.mutate(id)}
           />
-          <span className="text-xs text-slate-400">Item #{item.itemNumber} · {totalWords} words</span>
           <div className="inline-flex items-center gap-2">
-            <button type="button" onClick={() => saveVersion.mutate()} disabled={saveVersion.isPending}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>
-              {saveVersion.isPending ? 'Saving…' : 'Save version'}
+            <button type="button" onClick={() => saveVersion.mutate()} disabled={saveVersion.isPending || savedFlash}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-100">
+              {savedFlash ? (
+                <>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 6 9 17l-5-5" /></svg>
+                  Saved
+                </>
+              ) : (
+                <>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>
+                  {saveVersion.isPending ? 'Saving…' : 'Save version'}
+                </>
+              )}
             </button>
             <div className="relative">
               <button type="button" onClick={() => setExportOpen((o) => !o)} title="Export"
@@ -690,7 +699,13 @@ function VersionsTab({
 
   const list = versions.data ?? [];
   const filtered = sub === 'named' ? list.filter((v) => v.label) : list;
-  const groups = groupByDate(filtered);
+  // Render only the first `visibleCount`, with a Load more button, so a long
+  // history doesn't mount hundreds of cards at once. (Client-side — see note.)
+  const PAGE = 15;
+  const [visibleCount, setVisibleCount] = useState(PAGE);
+  useEffect(() => { setVisibleCount(PAGE); }, [sub]);
+  const groups = groupByDate(filtered.slice(0, visibleCount));
+  const hasMore = filtered.length > visibleCount;
   const today = fmtDate(new Date().toISOString());
 
   return (
@@ -792,15 +807,41 @@ function VersionsTab({
                 onRenameCancel={() => setRenameId(null)}
                 onRestoreAsk={() => { onRestoreAsk(v); setMenuId(null); }}
                 onCopyStart={() => { setCopyId(v.id); setCopyName(item.name); setMenuId(null); }}
-                deleteConfirming={deleteConfirmId === v.id} deleting={del.isPending}
                 onDeleteAsk={() => { setDeleteConfirmId(v.id); setMenuId(null); }}
-                onDeleteCancel={() => setDeleteConfirmId(null)}
-                onDeleteConfirm={() => del.mutate(v.id)}
               />
             ))}
           </div>
         ))}
+
+        {hasMore && (
+          <button type="button" onClick={() => setVisibleCount((c) => c + PAGE)}
+                  className="block w-full border-t border-slate-100 px-4 py-3 text-center text-[13px] font-semibold text-blue-600 hover:bg-slate-50">
+            Load more versions ({filtered.length - visibleCount} more)
+          </button>
+        )}
       </div>
+
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-6"
+             onClick={() => !del.isPending && setDeleteConfirmId(null)}>
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <p className="text-[16px] leading-relaxed text-slate-800">
+              Are you sure you want to delete this version? This action can’t be undone!
+            </p>
+            {del.isError && <p className="mt-2 text-[13px] text-red-600">Couldn’t delete. Please try again.</p>}
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setDeleteConfirmId(null)} disabled={del.isPending}
+                      className="rounded-md bg-slate-100 px-5 py-2.5 text-[13px] font-semibold uppercase tracking-wide text-slate-700 hover:bg-slate-200 disabled:opacity-50">
+                Cancel
+              </button>
+              <button type="button" onClick={() => del.mutate(deleteConfirmId)} disabled={del.isPending}
+                      className="rounded-md bg-red-600 px-6 py-2.5 text-[13px] font-semibold uppercase tracking-wide text-white hover:bg-red-700 disabled:opacity-50">
+                {del.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -890,7 +931,7 @@ function StatusLine({ v }: { v: ItemVersion }) {
 
 function VersionEntry({
   v, selected, onSelect, menuOpen, onMenu, renaming, renameText, onRenameStart, onRenameText, onRenameSave, onRenameCancel,
-  onRestoreAsk, onCopyStart, deleteConfirming, deleting, onDeleteAsk, onDeleteCancel, onDeleteConfirm,
+  onRestoreAsk, onCopyStart, onDeleteAsk,
 }: {
   v: ItemVersion;
   selected: boolean;
@@ -905,11 +946,7 @@ function VersionEntry({
   onRenameCancel: () => void;
   onRestoreAsk: () => void;
   onCopyStart: () => void;
-  deleteConfirming: boolean;
-  deleting: boolean;
   onDeleteAsk: () => void;
-  onDeleteCancel: () => void;
-  onDeleteConfirm: () => void;
 }) {
   const time = fmtTime(v.created_at);
   // Clicks on the card open the read-only preview; interactive controls inside
@@ -959,14 +996,6 @@ function VersionEntry({
       </div>
 
       <StatusLine v={v} />
-
-      {deleteConfirming && (
-        <div className="mt-2 flex items-center gap-2 text-[12px] text-slate-600" onClick={(e) => e.stopPropagation()}>
-          Delete this version?
-          <button type="button" onClick={onDeleteConfirm} disabled={deleting} className="font-semibold text-red-600 disabled:opacity-50">{deleting ? '…' : 'Yes, delete'}</button>
-          <button type="button" onClick={onDeleteCancel} className="text-slate-400">No</button>
-        </div>
-      )}
 
       {menuOpen && (
         <div className="absolute right-3 top-9 z-20 w-48 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl" onClick={(e) => e.stopPropagation()}>

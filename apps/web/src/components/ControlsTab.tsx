@@ -133,8 +133,8 @@ export function ControlsTab({
                 title="Open template"
                 className="text-slate-400 hover:text-slate-600 disabled:opacity-40"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15H4.5a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 6 8.6l-.06-.06A2 2 0 1 1 8.77 5.7l.06.06A1.65 1.65 0 0 0 12 4.6V4.5a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 19.4 8.6l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 21.4 15" />
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" />
                 </svg>
               </button>
             </p>
@@ -320,7 +320,8 @@ export function ControlsTab({
       <section className="border-t border-slate-200">
         <div className="flex items-center gap-2 bg-slate-100 px-4 py-3 text-[13px] font-bold tracking-wide text-slate-800">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <path d="M4 6h10M4 12h7M4 18h13" /><circle cx="18" cy="6" r="2" /><circle cx="15" cy="12" r="2" /><circle cx="21" cy="18" r="2" />
+            <circle cx="6" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="12" r="2" />
+            <path d="M8 6h6a2 2 0 0 1 2 2v2M8 18h6a2 2 0 0 0 2-2v-2" />
           </svg>
           <span className="flex-1">WORKFLOW</span>
           <a href="https://help.easycontent.io" target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[12px] font-medium text-blue-600 hover:underline">
@@ -352,6 +353,8 @@ export function ControlsTab({
                   isCurrent={s.id === currentId}
                   isComplete={currentPos >= 0 && s.position < currentPos}
                   isLast={i === statuses.length - 1}
+                  busy={changeStatus.isPending}
+                  onSelect={() => changeStatus.mutate(s.id)}
                 />
               ))}
             </ol>
@@ -405,12 +408,16 @@ function stringToColor(s: string): string {
   return palette[h % palette.length]!;
 }
 
-function StatusRow({ status, isCurrent, isComplete, isLast }: {
+function StatusRow({ status, isCurrent, isComplete, isLast, busy, onSelect }: {
   status: AssignmentStatus;
   isCurrent: boolean;
   isComplete: boolean;
   isLast: boolean;
+  busy: boolean;
+  onSelect: () => void;
 }) {
+  // Any non-current, non-locked status can be clicked to become current.
+  const clickable = !isCurrent && !status.read_only;
   return (
     <li className="relative pb-6 pl-8 last:pb-0">
       {!isLast && <span className="absolute left-[9px] top-5 h-full w-px bg-slate-200" />}
@@ -427,9 +434,22 @@ function StatusRow({ status, isCurrent, isComplete, isLast }: {
       </span>
 
       <div className="flex items-center gap-1.5">
-        <span className={isCurrent ? 'text-[15px] font-semibold text-slate-900' : 'text-[15px] text-slate-800'}>
-          {status.name}
-        </span>
+        {clickable ? (
+          <span className="group relative">
+            <button type="button" disabled={busy} onClick={onSelect}
+                    className="text-[15px] text-slate-800 hover:text-blue-600 hover:underline disabled:opacity-50">
+              {status.name}
+            </button>
+            <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 hidden w-52 -translate-x-1/2 rounded-md bg-slate-900 px-3 py-2 text-center text-[13px] leading-snug text-white group-hover:block">
+              Click to set this status as current
+              <span className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-slate-900" />
+            </span>
+          </span>
+        ) : (
+          <span className={isCurrent ? 'text-[15px] font-semibold text-slate-900' : 'text-[15px] text-slate-800'}>
+            {status.name}
+          </span>
+        )}
         {status.read_only && (
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-400" aria-label="Read-only">
             <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />

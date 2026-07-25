@@ -32,6 +32,12 @@ export function TemplatesGrid({
            className="text-blue-600 hover:underline">Learn more</a>
       </p>
 
+      {creating && (
+        <CreateTemplateInline projectId={projectId}
+                              onClose={() => setCreating(false)}
+                              onCreated={(id) => { setCreating(false); onOpenTemplate(id); }} />
+      )}
+
       {templates.isLoading ? (
         <p className="mt-8 text-sm text-slate-400">Loading…</p>
       ) : templates.isError ? (
@@ -56,11 +62,6 @@ export function TemplatesGrid({
         </div>
       )}
 
-      {creating && (
-        <CreateTemplateDialog projectId={projectId}
-                              onClose={() => setCreating(false)}
-                              onCreated={(id) => { setCreating(false); onOpenTemplate(id); }} />
-      )}
       {renaming && (
         <RenameTemplateDialog projectId={projectId} template={renaming} onClose={() => setRenaming(null)} />
       )}
@@ -130,9 +131,15 @@ function TemplateCard({
       </div>
 
       <button type="button" onClick={onOpen}
-              className="mt-1 self-start text-left text-[19px] font-semibold text-blue-600 hover:underline">
+              className="mt-1 self-start pr-8 text-left text-[19px] font-semibold text-blue-600 hover:underline">
         {t.name}
       </button>
+
+      {t.description ? (
+        <p className="mt-3 line-clamp-2 text-[15px] text-slate-600">{t.description}</p>
+      ) : (
+        <p className="mt-3 text-[15px] italic text-slate-400">No description</p>
+      )}
 
       <p className="mt-auto text-[13px] text-slate-400">
         {t.field_count} field{t.field_count === 1 ? '' : 's'} · {t.tab_count} tab{t.tab_count === 1 ? '' : 's'}
@@ -166,7 +173,9 @@ const IconRename = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" s
 const IconClone = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
 const IconTrash = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" /></svg>;
 
-function CreateTemplateDialog({
+/** The inline "create template" form (name + optional description + CREATE/CANCEL),
+ *  shown at the top of the grid — matching the reference. */
+function CreateTemplateInline({
   projectId, onClose, onCreated,
 }: {
   projectId: string;
@@ -175,31 +184,32 @@ function CreateTemplateDialog({
 }) {
   const qc = useQueryClient();
   const [name, setName] = useState('');
+  const [desc, setDesc] = useState('');
   const create = useMutation({
-    mutationFn: () => api.createTemplate(projectId, name.trim()),
+    mutationFn: () => api.createTemplate(projectId, name.trim(), desc.trim() || null),
     onSuccess: (res) => { void qc.invalidateQueries({ queryKey: ['templates', projectId] }); onCreated(res.id); },
   });
+  const submit = () => { if (name.trim() && !create.isPending) create.mutate(); };
   return (
-    <Dialog title="Create template" onClose={onClose}
-            footer={
-              <>
-                <GhostButton onClick={onClose}>Cancel</GhostButton>
-                <PrimaryButton disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}>
-                  {create.isPending ? 'Creating…' : 'Create template'}
-                </PrimaryButton>
-              </>
-            }>
-      <label className="block">
-        <span className="mb-1.5 block text-[15px] font-medium text-slate-700">Template name</span>
-        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Blog Post"
-               onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) create.mutate(); }}
-               className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-[15px] focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100" />
-      </label>
-      <p className="mt-2 text-[13px] text-slate-400">
-        Starts with a Main Content tab and Title + Content fields — add more in the builder.
-      </p>
-      {create.isError && <p className="mt-3 text-sm text-red-600">Couldn’t create — you may not have permission.</p>}
-    </Dialog>
+    <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-center gap-3">
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Template name"
+               onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+               className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2.5 text-[15px] focus:border-blue-500 focus:outline-none" />
+        <button type="button" onClick={submit} disabled={!name.trim() || create.isPending}
+                className="shrink-0 rounded-md bg-green-600 px-6 py-2.5 text-[13px] font-semibold uppercase tracking-wide text-white hover:bg-green-700 disabled:opacity-40">
+          {create.isPending ? 'Creating…' : 'Create'}
+        </button>
+        <button type="button" onClick={onClose}
+                className="shrink-0 rounded-md border border-slate-300 bg-slate-50 px-6 py-2.5 text-[13px] font-semibold uppercase tracking-wide text-slate-700 hover:bg-slate-100">
+          Cancel
+        </button>
+      </div>
+      <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Template description (optional)"
+             onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+             className="mt-3 w-full rounded-md border border-slate-200 px-3 py-2.5 text-[15px] text-slate-700 focus:border-blue-500 focus:outline-none" />
+      {create.isError && <p className="mt-2 text-sm text-red-600">Couldn’t create — you may not have permission.</p>}
+    </div>
   );
 }
 

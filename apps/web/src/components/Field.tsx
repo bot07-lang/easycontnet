@@ -309,8 +309,9 @@ export function Field({
   }
 
   if (field.type === 'guidelines') {
+    // The section's instructional text is authored on the template (its label).
     return (
-      <p className="text-[15px] leading-relaxed text-slate-700">{String(field.value ?? '')}</p>
+      <p className="text-[15px] leading-relaxed text-slate-700">{field.label || String(field.value ?? '')}</p>
     );
   }
 

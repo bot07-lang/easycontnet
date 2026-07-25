@@ -209,6 +209,7 @@ export interface VersionDetail {
 export interface TemplateSummary {
   id: string;
   name: string;
+  description: string | null;
   is_default: boolean;
   updated_at: string;
   tab_count: number;
@@ -242,6 +243,7 @@ export interface TemplateDetail {
   id: string;
   projectId: string;
   name: string;
+  description: string | null;
   isDefault: boolean;
   tabs: TemplateTab[];
 }
@@ -378,10 +380,10 @@ export const api = {
   listProjectTemplates: (projectId: string) =>
     request<TemplateSummary[]>(`/projects/${projectId}/templates`),
   getTemplate: (id: string) => request<TemplateDetail>(`/templates/${id}`),
-  createTemplate: (projectId: string, name: string) =>
+  createTemplate: (projectId: string, name: string, description?: string | null) =>
     request<{ id: string }>(`/projects/${projectId}/templates`, {
       method: 'POST',
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, description: description ?? null }),
     }),
   duplicateTemplate: (id: string) =>
     request<{ id: string }>(`/templates/${id}/duplicate`, { method: 'POST' }),
@@ -390,7 +392,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ targetProjectId }),
     }),
-  updateTemplate: (id: string, patch: { name?: string; isDefault?: boolean }) =>
+  updateTemplate: (id: string, patch: { name?: string; description?: string | null; isDefault?: boolean }) =>
     request<{ ok: true }>(`/templates/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteTemplate: (id: string) => request<{ ok: true }>(`/templates/${id}`, { method: 'DELETE' }),
   createField: (tabId: string, fieldType: string) =>

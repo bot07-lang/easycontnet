@@ -73,20 +73,27 @@ export function TemplateBuilder({ templateId, onBack }: { templateId: string; on
 
 function Header({ template: t, onBack, onRenamed }: { template: TemplateDetail; onBack: () => void; onRenamed: () => void }) {
   const [name, setName] = useState(t.name);
-  const save = useDebounced((v: string) => { if (v.trim()) api.updateTemplate(t.id, { name: v.trim() }).then(onRenamed).catch(() => {}); });
+  const [desc, setDesc] = useState(t.description ?? '');
+  const saveName = useDebounced((v: string) => { if (v.trim()) api.updateTemplate(t.id, { name: v.trim() }).then(onRenamed).catch(() => {}); });
+  const saveDesc = useDebounced((v: string) => { api.updateTemplate(t.id, { description: v.trim() || null }).then(onRenamed).catch(() => {}); });
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-4">
-      <button type="button" onClick={onBack} title="Back to templates"
-              className="grid h-9 w-9 place-items-center rounded text-slate-500 hover:bg-slate-100">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
-      </button>
-      <input value={name} onChange={(e) => { setName(e.target.value); save(e.target.value); }}
-             className="w-[360px] max-w-full rounded-md border border-slate-300 px-3 py-2 text-[16px] font-medium text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100" />
-      {t.isDefault && <span className="rounded border border-slate-300 px-2 py-0.5 text-[12px] font-medium text-slate-600">Default</span>}
-      <button type="button" onClick={onBack}
-              className="ml-auto rounded-md border border-slate-300 px-4 py-2 text-[13px] font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-50">
-        + Create template
-      </button>
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={onBack} title="Back to templates"
+                className="grid h-9 w-9 place-items-center rounded text-slate-500 hover:bg-slate-100">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
+        </button>
+        <input value={name} onChange={(e) => { setName(e.target.value); saveName(e.target.value); }}
+               className="w-[360px] max-w-full rounded-md border border-slate-300 px-3 py-2 text-[16px] font-medium text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100" />
+        {t.isDefault && <span className="rounded border border-slate-300 px-2 py-0.5 text-[12px] font-medium text-slate-600">Default</span>}
+        <button type="button" onClick={onBack}
+                className="ml-auto rounded-md border border-slate-300 px-4 py-2 text-[13px] font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-50">
+          + Create template
+        </button>
+      </div>
+      <input value={desc} onChange={(e) => { setDesc(e.target.value); saveDesc(e.target.value); }}
+             placeholder="Template description (optional)"
+             className="ml-12 mt-2 w-[min(100%-3rem,42rem)] rounded-md border border-transparent px-2 py-1 text-[14px] text-slate-500 placeholder:text-slate-400 hover:border-slate-200 focus:border-blue-500 focus:text-slate-700 focus:outline-none" />
     </div>
   );
 }

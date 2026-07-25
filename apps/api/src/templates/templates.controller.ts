@@ -38,11 +38,11 @@ export class TemplatesController {
   create(
     @CurrentUser() user: UserContext,
     @Param('projectId') projectId: string,
-    @Body() body: { name?: string },
+    @Body() body: { name?: string; description?: string | null },
   ) {
     const name = body?.name?.trim();
     if (!name) throw new BadRequestException('Template name is required');
-    return this.templates.createTemplate(user, projectId, name);
+    return this.templates.createTemplate(user, projectId, name, body?.description ?? null);
   }
 
   /** Duplicate a template (tabs + fields). manage_templates. */
@@ -70,13 +70,14 @@ export class TemplatesController {
   update(
     @CurrentUser() user: UserContext,
     @Param('id') id: string,
-    @Body() body: { name?: string; isDefault?: boolean },
+    @Body() body: { name?: string; description?: string | null; isDefault?: boolean },
   ) {
     if (body?.name !== undefined && !body.name.trim()) {
       throw new BadRequestException('Template name cannot be blank');
     }
     return this.templates.updateTemplate(user, id, {
       ...(body?.name !== undefined ? { name: body.name } : {}),
+      ...(body?.description !== undefined ? { description: body.description } : {}),
       ...(body?.isDefault !== undefined ? { isDefault: body.isDefault } : {}),
     });
   }
