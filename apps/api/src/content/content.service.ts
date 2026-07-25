@@ -75,6 +75,10 @@ export class ContentService {
         id: item.id,
         itemNumber: item.item_number,
         name: item.name,
+        templateId: item.template_id ?? null,
+        templateName: item.template_name ?? null,
+        keywords: item.keywords ?? [],
+        description: item.description ?? null,
         status: item.status_name
           ? { name: item.status_name, color: item.status_color }
           : null,
@@ -192,18 +196,36 @@ export class ContentService {
 
   /** Rename a content item (manage_content_items). */
   async renameItem(user: UserContext, itemId: string, name: string) {
+    return this.updateItem(user, itemId, { name: name.trim() });
+  }
+
+  /**
+   * Update an item's name and/or brief fields (description, keywords). Only the
+   * provided fields are written. manage_content_items; RLS enforces membership.
+   */
+  async updateItem(
+    user: UserContext,
+    itemId: string,
+    patch: { name?: string; description?: string | null; keywords?: string[] },
+  ) {
     try {
       return await this.db.withUser(user, async (c) => {
+        const sets: string[] = [];
+        const params: unknown[] = [itemId];
+        if (patch.name !== undefined) { params.push(patch.name); sets.push(`name = $${params.length}`); }
+        if (patch.description !== undefined) { params.push(patch.description); sets.push(`description = $${params.length}`); }
+        if (patch.keywords !== undefined) { params.push(patch.keywords); sets.push(`keywords = $${params.length}`); }
+        if (!sets.length) return { ok: true as const };
         const { rowCount } = await c.query(
-          `update public.content_items set name = $2, updated_at = now() where id = $1`,
-          [itemId, name.trim()],
+          `update public.content_items set ${sets.join(', ')}, updated_at = now() where id = $1`,
+          params,
         );
         if (!rowCount) throw new NotFoundException('Item not found');
         return { ok: true as const };
       });
     } catch (err) {
       const code = (err as { code?: string }).code;
-      if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot rename this item');
+      if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot edit this item');
       throw err;
     }
   }
@@ -252,6 +274,147 @@ export class ContentService {
   }
 
   /**
+   * What the "Approve and Complete review" modal needs: the item's current
+   * status, that status's rating criteria, the default forward target (next
+   * status by position), the full ladder (for the dropdown), and whether the
+   * caller's role may act on this status (gate 3).
+   */
+  async getApprovalInfo(user: UserContext, itemId: string) {
+    return this.db.withUser(user, async (c) => {
+      const item = (
+        await c.query(
+          `select ci.project_id, ci.current_status_id,
+                  s.name as status_name, s.color as status_color, s.position as status_position
+             from public.content_items ci
+             left join public.workflow_statuses s on s.id = ci.current_status_id
+            where ci.id = $1`,
+          [itemId],
+        )
+      ).rows[0];
+      if (!item) throw new NotFoundException('Item not found');
+
+      const statuses = (
+        await c.query(
+          `select id, name, color, position, is_terminal from public.workflow_statuses
+            where project_id = $1 order by position`,
+          [item.project_id],
+        )
+      ).rows;
+
+      const criteria = item.current_status_id
+        ? (
+            await c.query(
+              `select id, name, description from public.workflow_ratings
+                where status_id = $1 order by position, created_at`,
+              [item.current_status_id],
+            )
+          ).rows
+        : [];
+
+      const canApprove = item.current_status_id
+        ? ((
+            await c.query(
+              `select 1 from public.status_reviewing_roles where status_id = $1 and role_id = $2`,
+              [item.current_status_id, user.roleId],
+            )
+          ).rowCount ?? 0) > 0
+        : false;
+
+      const curPos = item.status_position as number | null;
+      const next = curPos == null ? null : statuses.find((s) => s.position > curPos) ?? null;
+
+      return {
+        currentStatus: item.current_status_id
+          ? { id: item.current_status_id as string, name: item.status_name as string, color: item.status_color as string }
+          : null,
+        nextStatusId: (next?.id as string | undefined) ?? null,
+        statuses,
+        criteria,
+        canApprove,
+      };
+    });
+  }
+
+  /**
+   * Approve & complete review: record the reviewer's per-criterion stars + an
+   * optional note, then optionally send the item forward (which snapshots a
+   * status_change version, like a normal status change). The caller's role must
+   * be a reviewing role for the item's current status.
+   */
+  async approve(
+    user: UserContext,
+    itemId: string,
+    body: { ratings: { ratingId: string; stars: number }[]; note: string | null; nextStatusId: string | null },
+  ) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const item = (
+          await c.query(
+            `select ci.org_id, ci.project_id, ci.current_status_id, s.name as status_name
+               from public.content_items ci
+               left join public.workflow_statuses s on s.id = ci.current_status_id
+              where ci.id = $1`,
+            [itemId],
+          )
+        ).rows[0];
+        if (!item) throw new NotFoundException('Item not found');
+
+        const allowed = item.current_status_id
+          ? ((
+              await c.query(
+                `select 1 from public.status_reviewing_roles where status_id = $1 and role_id = $2`,
+                [item.current_status_id, user.roleId],
+              )
+            ).rowCount ?? 0) > 0
+          : false;
+        if (!allowed) throw new ForbiddenException('You are not a reviewer for this status');
+
+        const review = (
+          await c.query(
+            `insert into public.item_reviews
+               (org_id, project_id, item_id, reviewer_id, from_status_id, from_status_name, note)
+             values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+            [item.org_id, item.project_id, itemId, user.userId, item.current_status_id, item.status_name, body.note],
+          )
+        ).rows[0];
+
+        for (const r of body.ratings) {
+          if (!(r.stars >= 1 && r.stars <= 5)) continue;
+          const name = (
+            await c.query(`select name from public.workflow_ratings where id = $1`, [r.ratingId])
+          ).rows[0]?.name as string | undefined;
+          await c.query(
+            `insert into public.item_review_ratings (review_id, rating_id, rating_name, stars)
+             values ($1, $2, $3, $4)`,
+            [review.id, r.ratingId, name ?? 'Rating', r.stars],
+          );
+        }
+
+        // Send forward, if requested (validate the target is in this project).
+        if (body.nextStatusId) {
+          const valid = await c.query(
+            `select 1 from public.content_items ci
+               join public.workflow_statuses s on s.id = $2 and s.project_id = ci.project_id
+              where ci.id = $1`,
+            [itemId, body.nextStatusId],
+          );
+          if (!valid.rowCount) throw new NotFoundException('That status is not in this item’s project');
+          await c.query(
+            `update public.content_items set current_status_id = $2, updated_at = now() where id = $1`,
+            [itemId, body.nextStatusId],
+          );
+          await this.snapshot(c, user, itemId, 'status_change', null, item.status_name);
+        }
+        return { ok: true as const };
+      });
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot approve this item');
+      throw err;
+    }
+  }
+
+  /**
    * Everything the assign-people panel needs: the item's project ladder with,
    * per status, its reviewing roles and the item's current assignees; plus the
    * project members (with role) so the UI can offer only those whose role is a
@@ -266,7 +429,7 @@ export class ContentService {
 
       const statuses = (
         await c.query(
-          `select s.id, s.name, s.color, s.position, s.is_initial, s.is_terminal,
+          `select s.id, s.name, s.color, s.position, s.is_initial, s.is_terminal, s.read_only,
                   coalesce((select jsonb_agg(rr.role_id) from public.status_reviewing_roles rr where rr.status_id = s.id), '[]'::jsonb) as reviewing_role_ids,
                   coalesce((select jsonb_agg(jsonb_build_object('id', pr.id, 'name', pr.full_name) order by pr.full_name)
                             from public.item_status_assignees a join public.profiles pr on pr.id = a.profile_id
@@ -449,8 +612,10 @@ export class ContentService {
         ).rows[0];
         if (!v) throw new NotFoundException('Version not found');
 
-        // Back up the current state before overwriting it.
-        await this.snapshot(c, user, itemId, 'manual', 'Backup before restore');
+        // Back up the current state before overwriting it — a plain manual
+        // version (timestamp + MANUAL tag), like the reference, so the state that
+        // was current before the restore stays recoverable.
+        await this.snapshot(c, user, itemId, 'manual', null);
 
         // Write the version's values back (only for fields that still exist).
         await c.query(
@@ -511,14 +676,18 @@ export class ContentService {
   private async loadItem(c: PoolClient, itemId: string) {
     const { rows } = await c.query(
       `select ci.id, ci.item_number, ci.name, ci.template_id,
+              ci.description, ci.keywords,
+              t.name as template_name,
               s.name as status_name, s.color as status_color
          from public.content_items ci
+         left join public.templates t on t.id = ci.template_id
          left join public.workflow_statuses s on s.id = ci.current_status_id
         where ci.id = $1`,
       [itemId],
     );
     return rows[0] as
       | { id: string; item_number: number; name: string; template_id: string | null;
+          description: string | null; keywords: string[] | null; template_name: string | null;
           status_name: string | null; status_color: string | null }
       | undefined;
   }

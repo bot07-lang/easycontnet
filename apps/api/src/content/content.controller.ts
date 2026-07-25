@@ -75,13 +75,27 @@ export class ContentController {
     return this.content.deleteItem(user, id);
   }
 
-  /** Rename an item. manage_content_items (code); RLS enforces membership. */
+  /**
+   * Update an item's name and/or brief (description, keywords).
+   * manage_content_items (code); RLS enforces membership.
+   */
   @Patch('items/:id')
   @RequirePermission('manage_content_items')
-  rename(@CurrentUser() user: UserContext, @Param('id') id: string, @Body() body: { name?: string }) {
-    const name = body?.name?.trim();
-    if (!name) throw new BadRequestException('name is required');
-    return this.content.renameItem(user, id, name);
+  update(
+    @CurrentUser() user: UserContext,
+    @Param('id') id: string,
+    @Body() body: { name?: string; description?: string | null; keywords?: string[] },
+  ) {
+    const patch: { name?: string; description?: string | null; keywords?: string[] } = {};
+    if (body?.name !== undefined) {
+      const name = body.name.trim();
+      if (!name) throw new BadRequestException('name cannot be empty');
+      patch.name = name;
+    }
+    if (body?.description !== undefined) patch.description = body.description;
+    if (body?.keywords !== undefined) patch.keywords = Array.isArray(body.keywords) ? body.keywords : [];
+    if (Object.keys(patch).length === 0) throw new BadRequestException('nothing to update');
+    return this.content.updateItem(user, id, patch);
   }
 
   /** Manual status change. manage_content_items (code); RLS enforces membership. */
@@ -94,6 +108,29 @@ export class ContentController {
   ) {
     if (!body?.statusId) throw new BadRequestException('statusId is required');
     return this.content.changeStatus(user, id, body.statusId);
+  }
+
+  /** What the "Approve and Complete review" modal needs (criteria, next status,
+   *  whether the caller may approve). Any project member may read it. */
+  @Get('items/:id/approval')
+  approvalInfo(@CurrentUser() user: UserContext, @Param('id') id: string) {
+    return this.content.getApprovalInfo(user, id);
+  }
+
+  /** Approve & complete review: record the reviewer's ratings + note, and
+   *  optionally send the item forward. manage_content_items + reviewing role. */
+  @Post('items/:id/approve')
+  @RequirePermission('manage_content_items')
+  approve(
+    @CurrentUser() user: UserContext,
+    @Param('id') id: string,
+    @Body() body: { ratings?: { ratingId: string; stars: number }[]; note?: string | null; nextStatusId?: string | null },
+  ) {
+    return this.content.approve(user, id, {
+      ratings: body?.ratings ?? [],
+      note: body?.note ?? null,
+      nextStatusId: body?.nextStatusId ?? null,
+    });
   }
 
   /* ---- versions ---- */

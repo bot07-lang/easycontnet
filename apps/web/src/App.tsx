@@ -82,22 +82,52 @@ function SignedOut() {
 
 function Workspace() {
   // The sidebar always has a project selected (defaults to the first). `showAll`
-  // toggles the All Projects dashboard vs the selected project's view.
-  const [projectId, setProjectId] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState(true);
-  const [nav, setNav] = useState<NavKey>('content');
-  const [itemId, setItemId] = useState<string | null>(null);
+  // toggles the All Projects dashboard vs the selected project's view. The current
+  // view is mirrored to the URL (below) so a browser reload returns to the same
+  // place — e.g. the exact content item — instead of the dashboard.
+  const url0 = new URLSearchParams(window.location.search);
+  const [projectId, setProjectId] = useState<string | null>(() => url0.get('project'));
+  const [showAll, setShowAll] = useState(() => !url0.get('project'));
+  const [nav, setNav] = useState<NavKey>(() => (url0.get('nav') as NavKey) || 'content');
+  const [itemId, setItemId] = useState<string | null>(() => url0.get('item'));
+  // The template whose builder is open (templates nav). Lifted here so the item
+  // editor's "Template" control can jump straight into it.
+  const [openTemplateId, setOpenTemplateId] = useState<string | null>(() => url0.get('template'));
 
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
 
-  // Default the dropdown to the first visible project once loaded.
+  // Default the dropdown to the first visible project once loaded (unless the URL
+  // already pinned one).
   if (!projectId && projects.data?.length) setProjectId(projects.data[0]!.id);
+
+  // Keep the URL in sync with the view (replaceState, so it doesn't spam history)
+  // so a reload restores the same project / item / tab.
+  useEffect(() => {
+    const p = new URLSearchParams();
+    if (!showAll && projectId) {
+      p.set('project', projectId);
+      if (nav !== 'content') p.set('nav', nav);
+      if (nav === 'content' && itemId) p.set('item', itemId);
+      if (nav === 'templates' && openTemplateId) p.set('template', openTemplateId);
+    }
+    const qs = p.toString();
+    window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
+  }, [showAll, projectId, nav, itemId, openTemplateId]);
 
   const selectProject = (id: string) => {
     setProjectId(id);
     setShowAll(false);
     setNav('content');
     setItemId(null);
+    setOpenTemplateId(null);
+  };
+
+  // Open a specific template's builder (from the item editor's Template control).
+  const openTemplate = (id: string) => {
+    setShowAll(false);
+    setNav('templates');
+    setItemId(null);
+    setOpenTemplateId(id);
   };
 
   return (
@@ -119,7 +149,8 @@ function Workspace() {
             />
           </div>
         ) : (
-          <ProjectView projectId={projectId} nav={nav} itemId={itemId} onOpenItem={setItemId} />
+          <ProjectView projectId={projectId} nav={nav} itemId={itemId} onOpenItem={setItemId}
+                       onOpenTemplate={openTemplate} openTemplateId={openTemplateId} onSetTemplate={setOpenTemplateId} />
         )}
       </div>
     </div>
@@ -127,23 +158,21 @@ function Workspace() {
 }
 
 function ProjectView({
-  projectId, nav, itemId, onOpenItem,
+  projectId, nav, itemId, onOpenItem, onOpenTemplate, openTemplateId, onSetTemplate,
 }: {
   projectId: string;
   nav: NavKey;
   itemId: string | null;
   onOpenItem: (id: string | null) => void;
+  onOpenTemplate: (templateId: string) => void;
+  openTemplateId: string | null;
+  onSetTemplate: (id: string | null) => void;
 }) {
   const items = useQuery({
     queryKey: ['items', projectId],
     queryFn: () => api.listItems(projectId),
     enabled: nav === 'content',
   });
-
-  // The template whose builder is open (templates nav only). Reset when the
-  // project changes so we never show another project's template.
-  const [openTemplateId, setOpenTemplateId] = useState<string | null>(null);
-  useEffect(() => { setOpenTemplateId(null); }, [projectId]);
 
   if (nav === 'workflow') {
     return (
@@ -160,9 +189,9 @@ function ProjectView({
       <div className="h-full overflow-y-auto p-6">
         <Suspense fallback={<LazyFallback />}>
           {openTemplateId ? (
-            <TemplateBuilder templateId={openTemplateId} onBack={() => setOpenTemplateId(null)} />
+            <TemplateBuilder templateId={openTemplateId} onBack={() => onSetTemplate(null)} />
           ) : (
-            <TemplatesGrid projectId={projectId} onOpenTemplate={setOpenTemplateId} />
+            <TemplatesGrid projectId={projectId} onOpenTemplate={onSetTemplate} />
           )}
         </Suspense>
       </div>
@@ -189,7 +218,7 @@ function ProjectView({
           ← Content items
         </button>
         <Suspense fallback={<LazyFallback />}>
-          <ItemEditor itemId={itemId} projectId={projectId} onOpenItem={onOpenItem} />
+          <ItemEditor itemId={itemId} projectId={projectId} onOpenItem={onOpenItem} onOpenTemplate={onOpenTemplate} />
         </Suspense>
       </div>
     );

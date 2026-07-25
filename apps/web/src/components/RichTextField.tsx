@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useId, useState } from 'react';
+import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
 import { useEditor, EditorContent, BubbleMenu } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -22,6 +22,34 @@ const SizedImage = Image.extend({
       },
     };
   },
+
+  // Render the image inside a resize frame (four draggable corner handles, shown
+  // only when the image is selected) — matching the reference. Serialization still
+  // goes through renderHTML (a bare <img>), so this only affects editing.
+  addNodeView() {
+    return ({ node, getPos, editor }) => {
+      const img = document.createElement('img');
+      const paint = (n: typeof node) => {
+        const a = n.attrs as Record<string, string | null>;
+        img.src = a.src ?? '';
+        img.alt = a.alt ?? '';
+        if (a.title) img.title = String(a.title); else img.removeAttribute('title');
+        for (const [k, v] of [['width', a.width], ['height', a.height], ['data-full-name', a.dataFullName]] as const) {
+          if (v) img.setAttribute(k, String(v)); else img.removeAttribute(k);
+        }
+      };
+      paint(node);
+      const dom = buildImageFrame(img, () => (typeof getPos === 'function' ? getPos() : undefined), editor);
+      return {
+        dom,
+        update: (updated) => {
+          if (updated.type.name !== 'image') return false;
+          paint(updated);
+          return true;
+        },
+      };
+    };
+  },
 });
 
 // The Link mark carries href/target/rel by default; add `title` so the
@@ -38,7 +66,6 @@ import TextAlign from '@tiptap/extension-text-align';
 import TextStyle from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
 import Highlight from '@tiptap/extension-highlight';
-import Table from '@tiptap/extension-table';
 import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
@@ -48,10 +75,15 @@ import Superscript from '@tiptap/extension-superscript';
 import Subscript from '@tiptap/extension-subscript';
 import FontFamily from '@tiptap/extension-font-family';
 import { FontSize, LineHeight, Div, Indent } from './editor-extensions';
+import { Figure } from './editor-figure';
+import { FramedTable } from './editor-table';
+import { KeywordHighlight, keywordHighlightKey } from './editor-keyword-highlight';
+import { buildImageFrame } from './editor-image-resize';
 import { EditorToolbar } from './EditorToolbar';
 import { ImageDialog, type ImageValue } from './ImageDialog';
-import { uploadDerivedImage, type DerivedImage } from '../lib/upload';
+import { uploadDerivedImage, uploadLibraryFile, type DerivedImage } from '../lib/upload';
 import { rotateImageToBlob } from '../lib/image-edit';
+import type { StoredFile } from '../lib/api';
 
 // filerobot is heavy — lazy-load the Edit Image modal so it (and filerobot) stay
 // out of the main bundle and only load when the editor is opened.
@@ -71,6 +103,8 @@ export function RichTextField({
   onActivate,
   docTitle,
   projectId,
+  onAttachFile,
+  highlightKeywords,
 }: {
   value: string;
   onChange: (html: string) => void;
@@ -81,13 +115,21 @@ export function RichTextField({
   onActivate: () => void;
   /** Item name — printed/previewed as the document title. */
   docTitle?: string;
-  /** Project the item belongs to — needed to upload rotated/edited images. */
+  /** Project the item belongs to — needed to upload rotated/edited/pasted images. */
   projectId?: string;
+  /** Attach a pasted image (now a library file) to the item's Files field. */
+  onAttachFile?: (file: StoredFile) => void;
+  /** Keywords to highlight in the body (CONTROLS › "Highlight in text"). */
+  highlightKeywords?: string[];
 }) {
   // Fullscreen is an editor-only overlay (the field fills the viewport), not
   // the browser's native fullscreen — matching the reference's behaviour.
   const [fullscreen, setFullscreen] = useState(false);
   const bubbleKey = useId(); // unique BubbleMenu plugin key per field instance
+  // handlePaste lives inside the editor (created once); read the latest
+  // projectId/onAttachFile through a ref so it isn't stale.
+  const pasteCtx = useRef({ projectId, onAttachFile });
+  pasteCtx.current = { projectId, onAttachFile };
   // Inline image editing state.
   const [busy, setBusy] = useState(false); // an upload (rotate/edit) is in flight
   const [editSrc, setEditSrc] = useState<string | null>(null); // Edit Image modal source
@@ -100,6 +142,7 @@ export function RichTextField({
       Underline,
       TitledLink.configure({ openOnClick: false, HTMLAttributes: { rel: 'noopener' } }),
       SizedImage,
+      Figure,
       // showOnlyCurrent:false so empty fields show the placeholder even when
       // not focused — otherwise an untouched field looks blank.
       Placeholder.configure({
@@ -116,11 +159,12 @@ export function RichTextField({
       Superscript,
       Subscript,
       Highlight.configure({ multicolor: true }),
-      Table.configure({ resizable: true }),
+      FramedTable.configure({ resizable: true }),
       TableRow,
       TableHeader,
       TableCell,
       Youtube.configure({ controls: true, nocookie: true }),
+      KeywordHighlight,
     ],
     content: value,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
@@ -154,6 +198,32 @@ export function RichTextField({
         view.dispatch(view.state.tr.insert(at, node));
         return true;
       },
+      // Paste an image from the clipboard (e.g. a screenshot): upload it as a
+      // library file, attach it to the item's Files field, and insert it inline —
+      // instead of embedding a huge base64 blob in the content.
+      handlePaste: (view, event) => {
+        const { projectId: pid, onAttachFile: attach } = pasteCtx.current;
+        const items = event.clipboardData?.items;
+        if (!items || !pid) return false;
+        const imageItem = Array.from(items).find((it) => it.kind === 'file' && it.type.startsWith('image/'));
+        const file = imageItem?.getAsFile();
+        if (!file) return false; // not an image paste — let the default handle it
+        event.preventDefault();
+        void (async () => {
+          try {
+            const lib = await uploadLibraryFile(pid, file, file.name || 'pasted-image.png');
+            attach?.({ id: lib.id, name: lib.name, mime: lib.mime, sizeBytes: lib.sizeBytes });
+            const imageType = view.state.schema.nodes.image;
+            if (imageType) {
+              const node = imageType.create({ src: lib.url ?? lib.fullUrl ?? '', alt: '', dataFullName: lib.fullUrl });
+              view.dispatch(view.state.tr.replaceSelectionWith(node));
+            }
+          } catch {
+            /* nothing inserted on failure */
+          }
+        })();
+        return true;
+      },
     },
   });
 
@@ -165,24 +235,37 @@ export function RichTextField({
     return () => document.removeEventListener('keydown', onKey);
   }, [fullscreen]);
 
+  // Push the active highlight keywords into the editor's decoration plugin.
+  // Joined into a stable string so the effect only fires when they actually change.
+  const kwSig = (highlightKeywords ?? []).join(' ');
+  useEffect(() => {
+    if (!editor) return;
+    editor.view.dispatch(editor.state.tr.setMeta(keywordHighlightKey, { keywords: highlightKeywords ?? [] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, kwSig]);
+
   if (!editor) return <div className="h-64 animate-pulse bg-slate-50" />;
 
-  // Point the selected image at the freshly-uploaded (rotated/edited) derived
-  // image: src → its thumbnail, data-full-name → the full-size. The derived image
-  // is NOT added to the Files library (matching the reference — only originals show
-  // there), so there's nothing to refresh.
+  // The image-bearing node under the cursor — a plain image or a captioned figure
+  // — and its attributes, so rotate/edit/insert work on either.
+  const activeImage = (): { type: 'image' | 'figure'; attrs: Record<string, unknown> } | null => {
+    if (editor.isActive('figure')) return { type: 'figure', attrs: editor.getAttributes('figure') };
+    if (editor.isActive('image')) return { type: 'image', attrs: editor.getAttributes('image') };
+    return null;
+  };
+
+  // Point the selected image/figure at the freshly-uploaded (rotated/edited)
+  // derived image: src → its thumbnail, data-full-name → the full-size. Derived
+  // images aren't added to the Files library (only originals show there).
   const applyNewFile = (img: DerivedImage) => {
     const newSrc = img.url || img.fullUrl || '';
+    const type = editor.isActive('figure') ? 'figure' : 'image';
     const swap = () => {
-      editor
-        .chain()
-        .focus()
-        .updateAttributes('image', { src: newSrc, dataFullName: img.fullUrl || null, width: null, height: null })
-        .run();
+      editor.chain().focus().updateAttributes(type, { src: newSrc, dataFullName: img.fullUrl || null, width: null, height: null }).run();
     };
     if (!newSrc) return swap();
     // Preload the new image, THEN swap — so the src change is instant and the image
-    // never blanks out mid-rotate (it updates in place, like the reference).
+    // never blanks out mid-rotate (updates in place, like the reference).
     // (document.createElement, not `new Image()` — Image is the TipTap node here.)
     const pre = document.createElement('img');
     pre.onload = swap;
@@ -193,7 +276,7 @@ export function RichTextField({
   // The best source to edit is the full-size original (data-full-name); fall back
   // to the displayed src for images that carry no reference.
   const imageSource = () => {
-    const a = editor.getAttributes('image');
+    const a = activeImage()?.attrs ?? {};
     return (a.dataFullName as string) || (a.src as string) || '';
   };
 
@@ -204,7 +287,7 @@ export function RichTextField({
     setBusy(true);
     try {
       const blob = await rotateImageToBlob(source, degrees);
-      const alt = (editor.getAttributes('image').alt as string) || 'image.png';
+      const alt = (activeImage()?.attrs.alt as string) || 'image.png';
       applyNewFile(await uploadDerivedImage(projectId, blob, alt.endsWith('.png') ? alt : `${alt}.png`));
     } catch {
       /* leave the image as-is on failure */
@@ -214,13 +297,52 @@ export function RichTextField({
   };
 
   const openImgDialog = () => {
-    const a = editor.getAttributes('image');
+    const active = activeImage();
+    const a = active?.attrs ?? {};
     setImgDialog({
       src: (a.src as string) || '',
       alt: (a.alt as string) || '',
       width: a.width != null ? String(a.width) : '',
       height: a.height != null ? String(a.height) : '',
+      showCaption: active?.type === 'figure',
+      fullSrc: (a.dataFullName as string) || '',
     });
+  };
+
+  // Upload for the Insert/Edit dialog's Upload tab (derived — not added to Files).
+  const uploadForDialog = projectId
+    ? (file: File) => uploadDerivedImage(projectId, file, file.name || 'image.png')
+    : undefined;
+
+  // The wrapping <figure> node (if the cursor is inside one) and its position.
+  const findFigure = () => {
+    const { $from } = editor.state.selection;
+    for (let d = $from.depth; d >= 0; d--) {
+      if ($from.node(d).type.name === 'figure') return { node: $from.node(d), pos: $from.before(d) };
+    }
+    return null;
+  };
+
+  // Apply the Insert/Edit dialog. Toggling "Show caption" converts a plain image
+  // into a captioned <figure> (or back), preserving the image attributes.
+  const applyImgDialog = (v: ImageValue) => {
+    const active = activeImage();
+    const attrs = { src: v.src, alt: v.alt, width: v.width || null, height: v.height || null, dataFullName: v.fullSrc || null };
+    const { state } = editor;
+    const figureType = editor.schema.nodes.figure;
+    const imageType = editor.schema.nodes.image;
+    if (v.showCaption && active?.type !== 'figure' && figureType) {
+      const fig = figureType.create(attrs, editor.schema.text('Caption'));
+      editor.view.dispatch(state.tr.replaceWith(state.selection.from, state.selection.to, fig).scrollIntoView());
+    } else if (!v.showCaption && active?.type === 'figure' && imageType) {
+      const wrap = findFigure();
+      if (wrap) {
+        editor.view.dispatch(state.tr.replaceWith(wrap.pos, wrap.pos + wrap.node.nodeSize, imageType.create(attrs)).scrollIntoView());
+      }
+    } else {
+      editor.chain().focus().updateAttributes(active?.type ?? 'image', attrs).run();
+    }
+    setImgDialog(null);
   };
 
   // Toolbar is always visible on rich fields. Focus-based show/hide proved
@@ -237,6 +359,7 @@ export function RichTextField({
         docTitle={docTitle}
         fullscreen={fullscreen}
         onToggleFullscreen={() => setFullscreen((v) => !v)}
+        onUpload={uploadForDialog}
       />
 
       {/* Floating toolbar over a selected image: rotate ×2 · Edit Image · Insert/Edit.
@@ -245,7 +368,7 @@ export function RichTextField({
       <BubbleMenu
         editor={editor}
         pluginKey={`image-bubble-${bubbleKey}`}
-        shouldShow={({ editor }) => editor.isActive('image')}
+        shouldShow={({ editor }) => editor.isActive('image') || editor.isActive('figure')}
         tippyOptions={{ placement: 'top', zIndex: 40 }}
       >
         <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
@@ -271,16 +394,7 @@ export function RichTextField({
 
       {/* Insert/Edit Image — editing the selected image's src/alt/size. */}
       {imgDialog && (
-        <ImageDialog
-          initial={imgDialog}
-          onClose={() => setImgDialog(null)}
-          onSave={(v) => {
-            editor.chain().focus().updateAttributes('image', {
-              src: v.src, alt: v.alt, width: v.width || null, height: v.height || null,
-            }).run();
-            setImgDialog(null);
-          }}
-        />
+        <ImageDialog initial={imgDialog} onClose={() => setImgDialog(null)} onSave={applyImgDialog} onUpload={uploadForDialog} />
       )}
 
       {/* Edit Image (filerobot) — lazy; on save uploads a new file and repoints. */}

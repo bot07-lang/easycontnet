@@ -31,8 +31,10 @@ export function FieldCounter({ field, value }: { field: ContentField; value: unk
     <div className="flex items-center gap-2">
       {over && (
         <span className="text-red-600" title="Over the recommended length" aria-hidden>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2 1 21h22L12 2zm1 14h-2v2h2v-2zm0-6h-2v4h2v-4z" />
+          <svg width="18" height="18" viewBox="0 0 24 24">
+            <path d="M12 3 2 20h20L12 3z" fill="currentColor" strokeLinejoin="round" />
+            <path d="M12 10v4.2" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="12" cy="17.2" r="1.15" fill="#fff" />
           </svg>
         </span>
       )}

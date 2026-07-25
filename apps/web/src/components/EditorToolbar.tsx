@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/react';
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { BlockTypeMenu, ColorPalette } from './toolbar-parts';
-import { ImageDialog } from './ImageDialog';
+import { ImageDialog, type ImageValue } from './ImageDialog';
 import { TableMenu } from './TableMenu';
 import { LinkDialog, type LinkValues } from './LinkDialog';
 import { MediaDialog } from './MediaDialog';
@@ -102,12 +102,14 @@ const I = {
 };
 
 export function EditorToolbar({
-  editor, docTitle, fullscreen, onToggleFullscreen,
+  editor, docTitle, fullscreen, onToggleFullscreen, onUpload,
 }: {
   editor: Editor;
   docTitle?: string;
   fullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  /** Enables the Insert Image dialog's Upload tab. */
+  onUpload?: (file: File) => Promise<{ url: string; fullUrl: string }>;
 }) {
   const [, forceRender] = useReducer((n: number) => n + 1, 0);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -121,7 +123,6 @@ export function EditorToolbar({
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkInit, setLinkInit] = useState<LinkValues>({ url: '', text: '', title: '', target: '' });
   const [insertSub, setInsertSub] = useState<'table' | null>(null);
-  const [insertHover, setInsertHover] = useState({ r: 0, c: 0 });
   // View › Visual aids defaults on (table guides visible); Show blocks off.
   const [visualAids, setVisualAids] = useState(true);
   const [showBlocks, setShowBlocks] = useState(false);
@@ -220,10 +221,11 @@ export function EditorToolbar({
     setSourceOpen(false);
   };
 
-  // Insert › Special character — drop the glyph at the cursor (dialog stays
-  // open so several can be inserted before closing).
+  // Insert › Special character — drop the glyph at the cursor and close the
+  // dialog (matching the reference: picking a character dismisses the popup).
   const insertChar = (ch: string) => {
     editor.chain().focus().insertContent(ch).run();
+    setSpecialOpen(false);
   };
 
   // Edit menu clipboard actions. Cut/Copy work off the current DOM selection;
@@ -282,19 +284,18 @@ export function EditorToolbar({
     else if (embed) editor.chain().focus().insertContent(embed).run();
   };
 
-  const insertImage = (v: { src: string; alt: string; width: string; height: string }) => {
+  const insertImage = (v: ImageValue) => {
+    const attrs = {
+      src: v.src,
+      alt: v.alt || null,
+      width: v.width || null,
+      height: v.height || null,
+      dataFullName: v.fullSrc || null,
+    };
     editor
       .chain()
       .focus()
-      .insertContent({
-        type: 'image',
-        attrs: {
-          src: v.src,
-          alt: v.alt || null,
-          width: v.width || null,
-          height: v.height || null,
-        },
-      })
+      .insertContent(v.showCaption ? { type: 'figure', attrs, content: [{ type: 'text', text: 'Caption' }] } : { type: 'image', attrs })
       .run();
     setImageOpen(false);
   };
@@ -306,7 +307,7 @@ export function EditorToolbar({
   return (
     <div className="border-b border-slate-200 bg-slate-50">
       {imageOpen && (
-        <ImageDialog onClose={() => setImageOpen(false)} onSave={insertImage} />
+        <ImageDialog onClose={() => setImageOpen(false)} onSave={insertImage} onUpload={onUpload} />
       )}
       {/* Menu bar */}
       <div ref={menuBarRef} className="flex items-center gap-1 border-b border-slate-200 px-2 py-1.5">
@@ -378,27 +379,10 @@ export function EditorToolbar({
                 <MenuItem icon={I.table} label="Table" chevron onMouseEnter={() => setInsertSub('table')}>
                   {insertSub === 'table' && (
                     <div className="absolute left-full top-0 z-40 -ml-1 rounded-md border border-slate-200 bg-white p-2 shadow-xl">
-                      <div className="inline-grid grid-cols-6 gap-1">
-                        {Array.from({ length: 36 }, (_, i) => {
-                          const r = Math.floor(i / 6) + 1;
-                          const c = (i % 6) + 1;
-                          const on = r <= insertHover.r && c <= insertHover.c;
-                          return (
-                            <button key={i} type="button" onMouseDown={(e) => e.preventDefault()}
-                              onMouseEnter={() => setInsertHover({ r, c })}
-                              onClick={() => {
-                                editor.chain().focus().insertTable({ rows: r, cols: c, withHeaderRow: true }).run();
-                                setOpenMenu(null); setInsertSub(null);
-                              }}
-                              className={`h-5 w-5 rounded-[3px] border ${
-                                on ? 'border-blue-500 bg-blue-200' : 'border-slate-300 bg-white'
-                              }`} />
-                          );
-                        })}
-                      </div>
-                      <div className="mt-1.5 text-[12px] text-slate-500">
-                        {insertHover.r > 0 ? `${insertHover.r} × ${insertHover.c}` : 'Pick a size'}
-                      </div>
+                      <TableGrid onPick={(r, c) => {
+                        editor.chain().focus().insertTable({ rows: r, cols: c, withHeaderRow: true }).run();
+                        setOpenMenu(null); setInsertSub(null);
+                      }} />
                     </div>
                   )}
                 </MenuItem>
@@ -523,22 +507,7 @@ export function EditorToolbar({
               <Dropdown width="w-48">
                 <Sub label="Table" icon={I.table} width="w-auto">
                   <div className="p-2">
-                    <div className="inline-grid grid-cols-8 gap-1">
-                      {Array.from({ length: 64 }, (_, i) => {
-                        const r = Math.floor(i / 8) + 1;
-                        const c = (i % 8) + 1;
-                        const on = r <= insertHover.r && c <= insertHover.c;
-                        return (
-                          <button key={i} type="button" onMouseDown={(e) => e.preventDefault()}
-                            onMouseEnter={() => setInsertHover({ r, c })}
-                            onClick={() => { editor.chain().focus().insertTable({ rows: r, cols: c, withHeaderRow: true }).run(); close(); }}
-                            className={`h-4 w-4 rounded-[2px] border ${on ? 'border-blue-500 bg-blue-200' : 'border-slate-300 bg-white'}`} />
-                        );
-                      })}
-                    </div>
-                    <div className="mt-1.5 text-center text-[12px] text-slate-500">
-                      {insertHover.r > 0 ? `${insertHover.c}x${insertHover.r}` : '0x0'}
-                    </div>
+                    <TableGrid onPick={(r, c) => { editor.chain().focus().insertTable({ rows: r, cols: c, withHeaderRow: true }).run(); close(); }} />
                   </div>
                 </Sub>
                 <Sub label="Cell" width="w-52">
@@ -825,6 +794,41 @@ function Sub({
 
 function MenuSep() {
   return <div className="my-1 border-t border-slate-200" />;
+}
+
+/**
+ * The table-size grid picker (Insert › Table and Table › Table). A cols×rows grid
+ * of cells; hovering highlights the top-left rectangle and shows "NxN", clicking
+ * inserts that size. Uses an inline grid-template-columns so the layout is robust
+ * regardless of Tailwind class generation, and owns its own hover state so the two
+ * pickers don't share/leak a highlight.
+ */
+function TableGrid({ cols = 10, rows = 10, onPick }: { cols?: number; rows?: number; onPick: (r: number, c: number) => void }) {
+  const [hover, setHover] = useState({ r: 0, c: 0 });
+  return (
+    <div onMouseLeave={() => setHover({ r: 0, c: 0 })}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1rem)`, gap: '2px' }}>
+        {Array.from({ length: cols * rows }, (_, i) => {
+          const r = Math.floor(i / cols) + 1;
+          const c = (i % cols) + 1;
+          const on = r <= hover.r && c <= hover.c;
+          return (
+            <button
+              key={i}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onMouseEnter={() => setHover({ r, c })}
+              onClick={() => onPick(r, c)}
+              className={`h-4 w-4 rounded-[2px] border ${on ? 'border-blue-500 bg-blue-200' : 'border-slate-300 bg-white'}`}
+            />
+          );
+        })}
+      </div>
+      <div className="mt-1.5 text-center text-[12px] text-slate-500">
+        {hover.r > 0 ? `${hover.c}x${hover.r}` : 'Pick a size'}
+      </div>
+    </div>
+  );
 }
 
 const FONTS = [

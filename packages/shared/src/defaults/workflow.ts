@@ -32,6 +32,8 @@ export interface WorkflowStatusDefinition {
   /** Role NAMES permitted to work on items here — gate 3. Resolved to ids at
    *  creation, so this stays readable and matches DEFAULT_ROLES. */
   reviewingRoles: readonly string[];
+  /** Five-star criteria reviewers grade against when approving from this status. */
+  ratings?: readonly { name: string; description?: string; position: number }[];
 }
 
 export const DEFAULT_WORKFLOW: readonly WorkflowStatusDefinition[] = [
@@ -47,6 +49,12 @@ export const DEFAULT_WORKFLOW: readonly WorkflowStatusDefinition[] = [
     color: '#eab308',
     position: 2048,
     reviewingRoles: ['Editor', 'Content Manager', 'Admin'],
+    // Three default grading criteria, matching a real EasyContent account.
+    ratings: [
+      { name: 'Content/Value', position: 1024 },
+      { name: 'Spelling/Grammar', position: 2048 },
+      { name: 'Format/Structure', position: 3072 },
+    ],
   },
   {
     name: 'Approved for Publishing',

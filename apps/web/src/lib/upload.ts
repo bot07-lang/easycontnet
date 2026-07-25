@@ -1,7 +1,21 @@
 import { supabase } from './supabase';
-import { api } from './api';
+import { api, type LibraryFile } from './api';
 
 const BUCKET = 'content-files';
+
+/**
+ * Upload a File/Blob and record it in the project's file library (a `project_files`
+ * row) — so it shows in the Files section. Returns the new library file (permanent
+ * public `url` thumbnail + `fullUrl` original). Used for pasted images, which become
+ * real library files attached to the item.
+ */
+export async function uploadLibraryFile(projectId: string, blob: Blob, name: string): Promise<LibraryFile> {
+  const { path, token } = await api.createUploadUrl(projectId, name);
+  const type = blob.type || 'image/png';
+  const up = await supabase.storage.from(BUCKET).uploadToSignedUrl(path, token, blob, { contentType: type });
+  if (up.error) throw up.error;
+  return api.recordFile({ projectId, path, name, mime: type, size: blob.size, folder: null });
+}
 
 export interface DerivedImage {
   /** 250px thumbnail URL for inline display. */

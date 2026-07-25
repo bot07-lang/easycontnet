@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Modal, Field, inputClass } from './Modal';
 
 export interface ImageValue {
@@ -6,22 +6,25 @@ export interface ImageValue {
   alt: string;
   width: string;
   height: string;
+  /** Whether the image shows an editable caption below it (a <figure>). */
+  showCaption: boolean;
+  /** Full-size original URL (data-full-name) for uploaded images; '' otherwise. */
+  fullSrc: string;
 }
 
 /**
  * Insert/Edit Image dialog, matching the reference: Source, Alt description,
- * Width/Height with an aspect-ratio lock, and a caption toggle. Replaces the
- * native prompt.
- *
- * Upload is a separate tab in the reference; here it is present but disabled
- * until the storage layer exists, rather than faked.
+ * Width/Height with an aspect-ratio lock, a caption toggle, and an Upload tab
+ * (drop / browse) that uploads via `onUpload` and fills the Source.
  */
 export function ImageDialog({
-  initial, onSave, onClose,
+  initial, onSave, onClose, onUpload,
 }: {
   initial?: Partial<ImageValue>;
   onSave: (v: ImageValue) => void;
   onClose: () => void;
+  /** Upload a file and return its display + full-size URLs. Enables the Upload tab. */
+  onUpload?: (file: File) => Promise<{ url: string; fullUrl: string }>;
 }) {
   const [src, setSrc] = useState(initial?.src ?? '');
   const [alt, setAlt] = useState(initial?.alt ?? '');
@@ -30,6 +33,25 @@ export function ImageDialog({
   const [locked, setLocked] = useState(true);
   const [ratio, setRatio] = useState<number | null>(null);
   const [tab, setTab] = useState<'general' | 'upload'>('general');
+  const [showCaption, setShowCaption] = useState(initial?.showCaption ?? false);
+  const [fullSrc, setFullSrc] = useState(initial?.fullSrc ?? '');
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const doUpload = async (file: File | undefined) => {
+    if (!onUpload || !file || !file.type.startsWith('image/')) return;
+    setUploading(true);
+    try {
+      const { url, fullUrl } = await onUpload(file);
+      setSrc(url);
+      setFullSrc(fullUrl);
+      probe(url);
+      setTab('general');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   // Derive the aspect ratio from the loaded image so the lock can keep it.
   const probe = (url: string) => {
@@ -72,7 +94,7 @@ export function ImageDialog({
           <button
             type="button"
             disabled={!src.trim()}
-            onClick={() => onSave({ src: src.trim(), alt: alt.trim(), width, height })}
+            onClick={() => onSave({ src: src.trim(), alt: alt.trim(), width, height, showCaption, fullSrc })}
             className="rounded bg-blue-600 px-5 py-2 text-sm font-semibold text-white
                        hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -95,9 +117,12 @@ export function ImageDialog({
           </button>
           <button
             type="button"
-            disabled
-            title="Upload — available once storage is wired up"
-            className="cursor-not-allowed rounded px-2 py-1 text-left text-slate-400"
+            onClick={() => onUpload && setTab('upload')}
+            disabled={!onUpload}
+            title={onUpload ? undefined : 'Upload — not available here'}
+            className={`rounded px-2 py-1 text-left ${
+              tab === 'upload' ? 'font-semibold text-blue-600 underline' : onUpload ? 'text-slate-600' : 'cursor-not-allowed text-slate-400'
+            }`}
           >
             Upload
           </button>
@@ -110,19 +135,24 @@ export function ImageDialog({
                 <input
                   className={inputClass}
                   value={src}
-                  onChange={(e) => setSrc(e.target.value)}
+                  onChange={(e) => { setSrc(e.target.value); setFullSrc(''); }}
                   onBlur={(e) => probe(e.target.value)}
                   placeholder="https://…"
                 />
-                <span
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded border border-slate-300 text-slate-400"
-                  title="Upload — available once storage is wired up"
+                <button
+                  type="button"
+                  onClick={() => onUpload && setTab('upload')}
+                  disabled={!onUpload}
+                  title={onUpload ? 'Upload an image' : 'Upload — not available here'}
+                  className={`grid h-9 w-9 shrink-0 place-items-center rounded border border-slate-300 ${
+                    onUpload ? 'text-slate-600 hover:bg-slate-50' : 'cursor-not-allowed text-slate-400'
+                  }`}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                     <path d="M12 15V3m0 0L8 7m4-4 4 4" />
                     <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
                   </svg>
-                </span>
+                </button>
               </div>
             </Field>
 
@@ -168,6 +198,53 @@ export function ImageDialog({
                 </svg>
               </button>
             </div>
+
+            <Field label="Caption">
+              <label className="flex cursor-pointer items-center gap-2 text-[15px] text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={showCaption}
+                  onChange={(e) => setShowCaption(e.target.checked)}
+                  className="h-[18px] w-[18px] accent-blue-600"
+                />
+                Show caption
+              </label>
+            </Field>
+          </div>
+        )}
+
+        {tab === 'upload' && (
+          <div className="flex-1">
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); void doUpload(e.dataTransfer.files[0]); }}
+              className={`grid min-h-[300px] place-items-center rounded-lg border-2 border-dashed p-6 text-center transition ${
+                dragOver ? 'border-blue-400 bg-blue-50/50' : 'border-slate-300'
+              }`}
+            >
+              {uploading ? (
+                <span className="text-[15px] text-slate-500">Uploading…</span>
+              ) : (
+                <div>
+                  <p className="text-[17px] text-slate-500">Drop an image here</p>
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    className="mt-4 rounded-md bg-slate-100 px-5 py-2.5 text-[15px] font-semibold text-slate-800 hover:bg-slate-200"
+                  >
+                    Browse for an image
+                  </button>
+                </div>
+              )}
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={(e) => { void doUpload(e.target.files?.[0]); e.target.value = ''; }}
+            />
           </div>
         )}
       </div>

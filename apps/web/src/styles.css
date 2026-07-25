@@ -14,12 +14,48 @@
 .prose-editor li { margin: .3rem 0; }
 .prose-editor a  { color: #2563eb; text-decoration: underline; }
 .prose-editor img { max-width: 100%; height: auto; border-radius: .375rem; margin: 1rem 0; }
-/* Blue selection frame when an inline image is selected (matches the reference). */
-.prose-editor img.ProseMirror-selectednode {
-  outline: 2px solid #4f9bf5;
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px rgba(79, 155, 245, 0.25);
+/* Keyword highlight (CONTROLS › "Highlight in text"): green wash on matched text
+   in the body; pink tags on the keyword list in the panel. Matching is literal
+   and case-sensitive (see editor-keyword-highlight.ts). */
+.prose-editor .cw-kw-hl { background: #c6f6cd; border-radius: 2px; }
+.cw-kw-tag { background: #f8c9d4; border-radius: 3px; padding: 1px 2px; }
+
+/* Resize frame around an editable image (plain or captioned): the image sits in
+   a positioned wrapper carrying four draggable corner handles that appear only
+   when the node is selected — matching the reference. */
+.prose-editor .cw-img-wrap { position: relative; display: inline-block; line-height: 0; max-width: 100%; }
+.prose-editor figure.image .cw-img-wrap { display: block; }
+.prose-editor .cw-img-wrap.ProseMirror-selectednode img { outline: 2px solid #4f9bf5; outline-offset: 2px; }
+.prose-editor .cw-resize-handle {
+  position: absolute; width: 10px; height: 10px; box-sizing: border-box;
+  background: #4f9bf5; border: 1px solid #fff; border-radius: 2px; z-index: 20; display: none;
 }
+.prose-editor .cw-resize-nw { top: -5px; left: -5px;  cursor: nwse-resize; }
+.prose-editor .cw-resize-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.prose-editor .cw-resize-sw { bottom: -5px; left: -5px;  cursor: nesw-resize; }
+.prose-editor .cw-resize-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+/* Handles show when the image node is selected, or (for a captioned figure) the
+   figure is selected / its caption is focused. */
+.prose-editor .ProseMirror-selectednode .cw-resize-handle,
+.prose-editor figure.image:focus-within .cw-resize-handle { display: block; }
+/* Captioned image: <figure class="image"><img><figcaption>…</figcaption></figure> */
+.prose-editor figure.image { display: table; margin: 1rem 0; }
+.prose-editor figure.image img { display: block; margin: 0; max-width: 100%; }
+.prose-editor figure.image figcaption {
+  display: table-caption; caption-side: bottom;
+  padding: .35rem .5rem; font-style: italic; font-weight: 600; color: #334155;
+}
+/* The caption box (blue border + height) reveals on HOVER, on caption FOCUS, and
+   when the figure is SELECTED; otherwise an empty caption stays invisible.
+   Selecting the figure also outlines the whole thing. */
+.prose-editor figure.image:hover figcaption,
+.prose-editor figure.image:focus-within figcaption,
+.prose-editor figure.image.ProseMirror-selectednode figcaption {
+  min-height: 1.7em; outline: 2px solid #4f9bf5; outline-offset: -1px;
+}
+/* Selecting the figure OR focusing the caption outlines the whole figure. */
+.prose-editor figure.image.ProseMirror-selectednode,
+.prose-editor figure.image:focus-within { outline: 2px solid #4f9bf5; outline-offset: 2px; }
 .prose-editor blockquote {
   border-left: 3px solid #cbd5e1; padding-left: 1rem; margin: 1rem 0; color: #475569;
 }
@@ -30,9 +66,42 @@
   background: #0f172a; color: #e2e8f0; padding: 1rem; border-radius: .5rem;
   overflow-x: auto; margin: 1rem 0;
 }
-.prose-editor table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
-.prose-editor th, .prose-editor td { border: 1px solid #cbd5e1; padding: .5rem .75rem; }
-.prose-editor th { background: #f8fafc; font-weight: 600; }
+/* Tables. resizable:true manages per-column widths through a colgroup, which
+   needs table-layout:fixed and a visible drag handle to be usable. */
+.prose-editor .tableWrapper { overflow-x: auto; margin: 1rem 0; }
+.prose-editor .tableWrapper table { margin: 0; }
+.prose-editor table { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 1rem 0; }
+.prose-editor th, .prose-editor td {
+  min-width: 2em; border: 1px solid #cbd5e1; padding: .5rem .75rem;
+  vertical-align: top; position: relative; box-sizing: border-box;
+}
+.prose-editor th { background: #f8fafc; font-weight: 600; text-align: left; }
+/* The draggable column divider (prosemirror-tables inserts this on the cell). */
+.prose-editor .column-resize-handle {
+  position: absolute; right: -2px; top: 0; bottom: 0; width: 4px;
+  background: #4f9bf5; pointer-events: none; z-index: 10;
+}
+.prose-editor.resize-cursor, .resize-cursor { cursor: col-resize; }
+/* Selected-cell wash. */
+.prose-editor .selectedCell::after {
+  content: ''; position: absolute; inset: 0; background: rgba(79, 155, 245, 0.14);
+  pointer-events: none; z-index: 2;
+}
+/* Whole-table selection frame: a blue outline with four draggable corner handles,
+   shown only when the table is active (cursor inside it). Dragging a corner scales
+   every column proportionally (see editor-table.ts). */
+.prose-editor .cw-table-wrap { position: relative; }
+.prose-editor .cw-table-frame { display: none; }
+.prose-editor .cw-table-wrap.cw-table-active { outline: 1.5px solid #7db4f5; outline-offset: 2px; }
+.prose-editor .cw-table-wrap.cw-table-active .cw-table-frame { display: block; }
+.prose-editor .cw-table-handle {
+  position: absolute; width: 11px; height: 11px; box-sizing: border-box;
+  background: #4f9bf5; border: 1px solid #fff; border-radius: 2px; z-index: 15;
+}
+.prose-editor .cw-table-nw { top: -6px; left: -6px;  cursor: nwse-resize; }
+.prose-editor .cw-table-ne { top: -6px; right: -6px; cursor: nesw-resize; }
+.prose-editor .cw-table-sw { bottom: -6px; left: -6px;  cursor: nesw-resize; }
+.prose-editor .cw-table-se { bottom: -6px; right: -6px; cursor: nwse-resize; }
 
 /* One stable editable height. Focusing slides the toolbar in above without the
    text area also resizing, so nothing lurches under the cursor. */

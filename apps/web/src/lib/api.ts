@@ -65,6 +65,12 @@ export interface ApiItem {
   id: string;
   itemNumber: number;
   name: string;
+  /** Template the item was created from (null if none). */
+  templateId: string | null;
+  templateName: string | null;
+  /** Brief keywords + description (brief "title" is the item name). */
+  keywords: string[];
+  description: string | null;
   status: { name: string; color: string } | null;
   tabs: { id: string; name: string; fields: ApiField[] }[];
 }
@@ -149,6 +155,15 @@ export interface WorkflowConfig {
   ratings: WorkflowRating[];
 }
 
+export interface ApprovalInfo {
+  currentStatus: { id: string; name: string; color: string } | null;
+  nextStatusId: string | null;
+  statuses: { id: string; name: string; color: string; position: number; is_terminal: boolean }[];
+  criteria: { id: string; name: string; description: string | null }[];
+  /** Whether the caller's role may act on (approve from) the current status. */
+  canApprove: boolean;
+}
+
 export interface AssignmentStatus {
   id: string;
   name: string;
@@ -156,6 +171,7 @@ export interface AssignmentStatus {
   position: number;
   is_initial: boolean;
   is_terminal: boolean;
+  read_only: boolean;
   reviewing_role_ids: string[];
   assignees: { id: string; name: string }[];
 }
@@ -274,8 +290,15 @@ export const api = {
     request<{ ok: true }>(`/content/items/${id}`, { method: 'DELETE' }),
   renameItem: (id: string, name: string) =>
     request<{ ok: true }>(`/content/items/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  updateItemBrief: (id: string, patch: { name?: string; description?: string | null; keywords?: string[] }) =>
+    request<{ ok: true }>(`/content/items/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   changeItemStatus: (id: string, statusId: string) =>
     request<{ ok: true }>(`/content/items/${id}/status`, { method: 'PATCH', body: JSON.stringify({ statusId }) }),
+  getApprovalInfo: (id: string) => request<ApprovalInfo>(`/content/items/${id}/approval`),
+  approveItem: (
+    id: string,
+    body: { ratings: { ratingId: string; stars: number }[]; note: string | null; nextStatusId: string | null },
+  ) => request<{ ok: true }>(`/content/items/${id}/approve`, { method: 'POST', body: JSON.stringify(body) }),
   listVersions: (id: string) => request<ItemVersion[]>(`/content/items/${id}/versions`),
   saveVersion: (id: string, label?: string) =>
     request<{ id: string }>(`/content/items/${id}/versions`, {

@@ -284,7 +284,7 @@ function tooltipFor(f: StoredFile, lib?: LibraryFile): string {
 }
 
 export function Field({
-  field, onChange, activeFieldId, onActivate, docTitle, projectId,
+  field, onChange, activeFieldId, onActivate, docTitle, projectId, onAttachFile, highlightKeywords,
 }: {
   field: ContentField;
   onChange: (id: string, value: unknown) => void;
@@ -294,6 +294,10 @@ export function Field({
   docTitle?: string;
   /** Project the item belongs to — needed by the file field's library. */
   projectId?: string;
+  /** Attach a pasted image (library file) to the item's Files field. */
+  onAttachFile?: (file: StoredFile) => void;
+  /** Keywords to highlight in the body — only the main content field gets these. */
+  highlightKeywords?: string[];
 }) {
   // Section fields hold no value and get no chrome.
   if (field.type === 'heading') {
@@ -466,6 +470,8 @@ export function Field({
           onActivate={() => onActivate(field.id)}
           docTitle={docTitle}
           projectId={projectId}
+          onAttachFile={onAttachFile}
+          highlightKeywords={highlightKeywords}
         />
       </FieldShell>
     );

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type ApiItem, type ItemVersion } from '../lib/api';
+import { api, type ApiItem, type ItemVersion, type StoredFile } from '../lib/api';
 import { CompareDialog, DIFF_CSS } from './CompareDialog';
 import { fieldValueToHtml, isDiffableField } from '../lib/diff-fields';
 import * as saveManager from '../lib/save-manager';
 import type { ContentField } from '../mock/article';
 import { Field } from './Field';
+import { ControlsTab } from './ControlsTab';
+import { toast } from '../lib/toast';
 import { toPlainText } from '../lib/counts';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'retrying' | 'error';
@@ -164,7 +166,7 @@ function downloadText(filename: string, text: string, mime: string) {
  * each field a short beat after you stop typing. A failed save (e.g. RLS says
  * you can't edit) surfaces rather than silently dropping the change.
  */
-export function ItemEditor({ itemId, projectId, onOpenItem }: { itemId: string; projectId?: string; onOpenItem?: (id: string) => void }) {
+export function ItemEditor({ itemId, projectId, onOpenItem, onOpenTemplate }: { itemId: string; projectId?: string; onOpenItem?: (id: string) => void; onOpenTemplate?: (templateId: string) => void }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['item', itemId],
     queryFn: () => api.getItem(itemId),
@@ -175,18 +177,25 @@ export function ItemEditor({ itemId, projectId, onOpenItem }: { itemId: string; 
   });
   // Bumped after a restore to remount Loaded so its field state re-initialises.
   const [nonce, setNonce] = useState(0);
+  // The right-rail tab lives out here (above the nonce key) so a restore's remount
+  // doesn't bounce the user off the Versions tab back to Controls.
+  const [sideTab, setSideTab] = useState<'controls' | 'comments' | 'versions'>('controls');
 
   if (isLoading) return <div className="p-8 text-slate-400">Loading…</div>;
   if (error) return <div className="p-8 text-red-600">{String(error)}</div>;
   if (!data) return null;
-  return <Loaded key={nonce} item={data} projectId={projectId} onReload={() => setNonce((n) => n + 1)} onOpenItem={onOpenItem} />;
+  return <Loaded key={nonce} item={data} projectId={projectId} onReload={() => setNonce((n) => n + 1)}
+                 onOpenItem={onOpenItem} onOpenTemplate={onOpenTemplate} sideTab={sideTab} onSideTab={setSideTab} />;
 }
 
-function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; projectId?: string; onReload: () => void; onOpenItem?: (id: string) => void }) {
+function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab, onSideTab }: { item: ApiItem; projectId?: string; onReload: () => void; onOpenItem?: (id: string) => void; onOpenTemplate?: (templateId: string) => void; sideTab: 'controls' | 'comments' | 'versions'; onSideTab: (t: 'controls' | 'comments' | 'versions') => void }) {
   const [activeTab, setActiveTab] = useState(item.tabs[0]?.id ?? '');
   const [values, setValues] = useState<Record<string, unknown>>(() =>
     Object.fromEntries(item.tabs.flatMap((t) => t.fields).map((f) => [f.id, f.value])),
   );
+  // Latest values, for callbacks that fire from async work (e.g. paste upload).
+  const valuesRef = useRef(values);
+  valuesRef.current = values;
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [save, setSave] = useState<SaveState>('idle');
@@ -195,6 +204,29 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
   // unsaved-changes guard; a field is removed once its save succeeds.
   const pending = useRef<Record<string, unknown>>({});
   const qc = useQueryClient();
+
+  // The main content field (rich body) — the only field keyword-highlight targets
+  // ("count only in the main content", per the reference).
+  const mainFieldId = useMemo(() => {
+    const rich = item.tabs.flatMap((t) => t.fields).filter((f) => f.type === 'paragraph_text' && !f.isPlainText);
+    return (rich.find((f) => f.isSystem) ?? rich[0])?.id ?? null;
+  }, [item]);
+  // Keywords currently highlighted in the body (empty = highlight off).
+  const [highlightKeywords, setHighlightKeywords] = useState<string[]>([]);
+  const mainContentText = mainFieldId ? toPlainText(String(values[mainFieldId] ?? '')) : '';
+
+  // Approval info drives the top-bar status dropdown (current status + ladder).
+  const approval = useQuery({ queryKey: ['approval', item.id], queryFn: () => api.getApprovalInfo(item.id) });
+  const changeStatus = useMutation({
+    mutationFn: (statusId: string) => api.changeItemStatus(item.id, statusId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['item', item.id] });
+      void qc.invalidateQueries({ queryKey: ['approval', item.id] });
+      void qc.invalidateQueries({ queryKey: ['assignment', item.id] });
+      void qc.invalidateQueries({ queryKey: ['versions', item.id] });
+      onReload();
+    },
+  });
 
   // Export the item as a standalone HTML file. Resolves fresh signed URLs for any
   // asset fields first (the stored value only keeps file references, not URLs).
@@ -248,6 +280,7 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
       setRestoreTarget(null);
       setPreview(null);
       onReload();
+      toast('The version has been restored');
     },
   });
 
@@ -272,6 +305,20 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
     setSave('saving');
     clearTimeout(timers.current[fieldId]);
     timers.current[fieldId] = setTimeout(() => persist(fieldId, value), AUTOSAVE_DEBOUNCE_MS);
+  };
+
+  // A pasted image became a library file — attach it to the item's Files field so
+  // it shows there, linked to this item. Persists immediately (discrete action).
+  const attachFile = (sf: StoredFile) => {
+    const fileField = item.tabs.flatMap((t) => t.fields).find((f) => f.type === 'file_image_upload');
+    if (!fileField) return;
+    const current = Array.isArray(valuesRef.current[fileField.id]) ? (valuesRef.current[fileField.id] as StoredFile[]) : [];
+    if (current.some((f) => f.id === sf.id)) return; // already attached
+    const next = [...current, sf];
+    setValues((prev) => ({ ...prev, [fileField.id]: next }));
+    pending.current[fileField.id] = next;
+    persist(fileField.id, next);
+    if (projectId) void qc.invalidateQueries({ queryKey: ['files', projectId] });
   };
 
   // Flush on leave: when the editor unmounts (back, switch item, go to Dashboard),
@@ -354,6 +401,14 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
             {t.name}
           </button>
         ))}
+        {item.templateId && onOpenTemplate && (
+          <button type="button" onClick={() => onOpenTemplate(item.templateId!)} title="Open template"
+                  className="mb-1 ml-1 grid h-8 w-8 shrink-0 place-items-center self-center rounded text-slate-500 hover:bg-slate-200 hover:text-slate-700">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15H4.5a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 6 8.6l-.06-.06A2 2 0 1 1 8.77 5.7l.06.06A1.65 1.65 0 0 0 12 4.6V4.5a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 19.4 8.6l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 21.4 15" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Action bar — or the preview header when viewing a past version. */}
@@ -372,12 +427,12 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 px-5 py-3">
-          {item.status && (
-            <span className="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-800">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.status.color }} />
-              {item.status.name}
-            </span>
-          )}
+          <TopStatusSelect
+            current={approval.data?.currentStatus ?? (item.status ? { id: '', name: item.status.name, color: item.status.color } : null)}
+            statuses={approval.data?.statuses ?? []}
+            busy={changeStatus.isPending}
+            onChange={(id) => changeStatus.mutate(id)}
+          />
           <span className="text-xs text-slate-400">Item #{item.itemNumber} · {totalWords} words</span>
           <div className="inline-flex items-center gap-2">
             <button type="button" onClick={() => saveVersion.mutate()} disabled={saveVersion.isPending}
@@ -463,6 +518,8 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
                 onActivate={setActiveFieldId}
                 docTitle={item.name}
                 projectId={projectId}
+                onAttachFile={attachFile}
+                highlightKeywords={f.id === mainFieldId ? highlightKeywords : undefined}
               />
             );
           })
@@ -475,10 +532,17 @@ function Loaded({ item, projectId, onReload, onOpenItem }: { item: ApiItem; proj
         projectId={projectId}
         onReload={onReload}
         onOpenItem={onOpenItem}
+        onOpenTemplate={onOpenTemplate}
+        tab={sideTab}
+        onTab={onSideTab}
+        highlightKeywords={highlightKeywords}
+        onSetHighlight={setHighlightKeywords}
+        mainContentText={mainContentText}
         previewId={preview?.id ?? null}
         onPreview={(v) => setPreview(v ? { id: v.id, createdAt: v.created_at } : null)}
         onRestoreAsk={(v) => setRestoreTarget({ id: v.id, createdAt: v.created_at })}
       />
+
 
       {restoreTarget && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-6" onClick={() => !restore.isPending && setRestoreTarget(null)}>
@@ -531,33 +595,47 @@ function ReadOnlyField({ label, html }: { label: string; html: string }) {
  * three-dot menu (rename / restore).
  */
 function VersionsPanel({
-  item, projectId, onReload, onOpenItem, previewId, onPreview, onRestoreAsk,
+  item, projectId, onReload, onOpenItem, onOpenTemplate, tab, onTab, highlightKeywords, onSetHighlight, mainContentText, previewId, onPreview, onRestoreAsk,
 }: {
   item: ApiItem;
   projectId?: string;
   onReload: () => void;
   onOpenItem?: (id: string) => void;
+  onOpenTemplate?: (templateId: string) => void;
+  tab: 'controls' | 'comments' | 'versions';
+  onTab: (t: 'controls' | 'comments' | 'versions') => void;
+  highlightKeywords: string[];
+  onSetHighlight: (keywords: string[]) => void;
+  mainContentText: string;
   previewId: string | null;
   onPreview: (v: ItemVersion | null) => void;
   onRestoreAsk: (v: ItemVersion) => void;
 }) {
-  const [tab, setTab] = useState<'controls' | 'comments' | 'versions'>('versions');
   return (
     <aside className="w-80 shrink-0 rounded-lg border border-slate-200 bg-white shadow-sm">
       <div className="grid grid-cols-3 border-b border-slate-200">
-        <SideTab active={tab === 'controls'} onClick={() => setTab('controls')} label="CONTROLS"
+        <SideTab active={tab === 'controls'} onClick={() => onTab('controls')} label="CONTROLS"
                  icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 6h16M4 12h16M4 18h16" /></svg>} />
-        <SideTab active={tab === 'comments'} onClick={() => setTab('comments')} label="COMMENTS"
+        <SideTab active={tab === 'comments'} onClick={() => onTab('comments')} label="COMMENTS"
                  icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z" /></svg>} />
-        <SideTab active={tab === 'versions'} onClick={() => setTab('versions')} label="VERSIONS"
+        <SideTab active={tab === 'versions'} onClick={() => onTab('versions')} label="VERSIONS"
                  icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 3v5h5" /><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" /><path d="M12 7v5l3 3" /></svg>} />
       </div>
       {tab === 'versions' ? (
         <VersionsTab item={item} projectId={projectId} onReload={onReload} onOpenItem={onOpenItem}
                      previewId={previewId} onPreview={onPreview} onRestoreAsk={onRestoreAsk} />
+      ) : tab === 'controls' ? (
+        <ControlsTab
+          item={item}
+          onReload={onReload}
+          onOpenTemplate={onOpenTemplate}
+          highlightKeywords={highlightKeywords}
+          onSetHighlight={onSetHighlight}
+          mainContentText={mainContentText}
+        />
       ) : (
         <div className="grid place-items-center px-6 py-12 text-center text-[13px] text-slate-400">
-          {tab === 'comments' ? 'Comments are coming in a later phase.' : 'Workflow controls (submit / approve / reject) are coming next.'}
+          Comments are coming in a later phase.
         </div>
       )}
     </aside>
@@ -731,6 +809,48 @@ function DateHeader({ label }: { label: string }) {
   return <div className="sticky top-0 z-10 border-y border-blue-100 bg-blue-50 px-4 py-2 text-[14px] font-semibold text-slate-800">{label}</div>;
 }
 
+/** The item's status shown as a dropdown in the top bar — pick a status to change
+ *  it (any-to-any, like the Controls panel's changer). */
+function TopStatusSelect({
+  current, statuses, busy, onChange,
+}: {
+  current: { id: string; name: string; color: string } | null;
+  statuses: { id: string; name: string; color: string }[];
+  busy: boolean;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+  if (!current) return null;
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" disabled={busy} onClick={() => setOpen((v) => !v)}
+              className="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-800 hover:bg-slate-50 disabled:opacity-50">
+        <span className="h-2.5 w-2.5 rounded-full" style={{ background: current.color }} />
+        <span className="font-medium">{busy ? 'Changing…' : current.name}</span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`text-slate-500 transition ${open ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && statuses.length > 0 && (
+        <div className="absolute left-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-xl">
+          {statuses.map((s) => (
+            <button key={s.id} type="button" onClick={() => { if (s.id !== current.id) onChange(s.id); setOpen(false); }}
+                    className={`flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm hover:bg-slate-100 ${s.id === current.id ? 'bg-slate-100' : ''}`}>
+              <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: s.color }} />
+              <span className={s.id === current.id ? 'font-semibold text-slate-900' : 'text-slate-700'}>{s.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Badge({ kind }: { kind: 'current' | 'manual' | 'status_change' | 'auto' }) {
   const map: Record<string, [string, string]> = {
     current: ['CURRENT', 'bg-green-500'],
@@ -739,7 +859,7 @@ function Badge({ kind }: { kind: 'current' | 'manual' | 'status_change' | 'auto'
     auto: ['AUTO', 'bg-slate-400'],
   };
   const [label, bg] = map[kind] ?? ['', 'bg-slate-400'];
-  return <span className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white ${bg}`}>{label}</span>;
+  return <span className={`shrink-0 whitespace-nowrap rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white ${bg}`}>{label}</span>;
 }
 
 function StatusDot({ color, name }: { color: string | null; name: string | null }) {
@@ -804,18 +924,30 @@ function VersionEntry({
     >
       <div className="flex items-center justify-between gap-2">
         {renaming ? (
-          <input autoFocus value={renameText} onClick={(e) => e.stopPropagation()} onChange={(e) => onRenameText(e.target.value)}
+          <input autoFocus placeholder="Version name" value={renameText} onClick={(e) => e.stopPropagation()} onChange={(e) => onRenameText(e.target.value)}
                  onKeyDown={(e) => { if (e.key === 'Enter') onRenameSave(); if (e.key === 'Escape') onRenameCancel(); }}
-                 onBlur={onRenameCancel}
-                 className="w-full rounded border border-slate-300 px-1.5 py-1 text-[13px] focus:border-blue-500 focus:outline-none" />
+                 onBlur={() => (renameText.trim() ? onRenameSave() : onRenameCancel())}
+                 className="min-w-0 flex-1 rounded border border-blue-500 px-2 py-1.5 text-[14px] text-slate-800 focus:outline-none" />
+        ) : v.label ? (
+          // Named version: the name is clickable too, so it can be re-edited.
+          <button type="button" onClick={stop(onRenameStart)} title="Click to rename this version"
+                  className="min-w-0 truncate text-left text-[14px] font-semibold text-slate-800 hover:underline">{v.label}</button>
         ) : (
-          <span className="text-[14px] font-semibold text-slate-800">{v.label || time}</span>
+          // Unnamed version: the timestamp is the heading — click it to name the version.
+          <button type="button" onClick={stop(onRenameStart)} title="Click to name this version"
+                  className="text-left text-[14px] font-semibold text-slate-800 hover:underline">{time}</button>
         )}
         <Badge kind={v.kind} />
       </div>
 
-      {/* When the version is named, still show its time beneath the name. */}
-      {!renaming && v.label && <div className="mt-0.5 text-[13px] font-semibold text-slate-700">{time}</div>}
+      {/* The timestamp sits beneath the name (or beneath the input while editing).
+          Clicking it opens the name editor (#152). */}
+      {renaming ? (
+        <div className="mt-1 text-[13px] font-semibold text-slate-700">{time}</div>
+      ) : v.label ? (
+        <button type="button" onClick={stop(onRenameStart)} title="Click to rename this version"
+                className="mt-0.5 block text-left text-[13px] font-semibold text-slate-700 hover:underline">{time}</button>
+      ) : null}
 
       <div className="mt-1 flex items-center justify-between">
         <span className="text-[12px] text-slate-500">
