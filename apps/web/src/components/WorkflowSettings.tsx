@@ -156,7 +156,8 @@ function StatusDisplayRow({
         {s.is_terminal ? null : s.auto_due_days ? `${s.auto_due_days} day${s.auto_due_days > 1 ? 's' : ''}` : '-'}
       </td>
       <td className="border-b border-slate-100 px-3 py-3">
-        {s.is_terminal ? null : s.read_only
+        {/* Read-only is allowed on terminal statuses too (e.g. a locked "Completed"). */}
+        {s.read_only
           ? <span className="inline-flex items-center gap-1 text-slate-600" title="Read-only"><LockIcon /> On</span>
           : <span className="text-slate-400">-</span>}
       </td>
@@ -214,8 +215,8 @@ function StatusEditRow({
         statusId = res.id;
       } else {
         await api.updateStatus(status!.id, {
-          name: name.trim(), color,
-          ...(terminal ? {} : { autoDueDays: dueVal, readOnly, reviewingRoleIds: roleList }),
+          name: name.trim(), color, readOnly,
+          ...(terminal ? {} : { autoDueDays: dueVal, reviewingRoleIds: roleList }),
         });
       }
 
@@ -279,10 +280,9 @@ function StatusEditRow({
       </td>
 
       <td className="border-b border-slate-100 px-3 py-3">
-        {terminal ? null : (
-          <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)}
-                 className="h-4 w-4 cursor-pointer accent-blue-600" />
-        )}
+        {/* Read-only is editable even for terminal statuses. */}
+        <input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)}
+               className="h-4 w-4 cursor-pointer accent-blue-600" />
       </td>
 
       <td className="border-b border-slate-100 px-3 py-3">

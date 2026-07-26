@@ -107,6 +107,7 @@ export function RichTextField({
   projectId,
   onAttachFile,
   highlightKeywords,
+  editable = true,
 }: {
   value: string;
   onChange: (html: string) => void;
@@ -115,6 +116,9 @@ export function RichTextField({
   active: boolean;
   /** Called when the field gains focus, to claim the toolbar. */
   onActivate: () => void;
+  /** When false, the field is locked (item in a read-only status): no toolbar,
+   *  the content is displayed but not editable. */
+  editable?: boolean;
   /** Item name — printed/previewed as the document title. */
   docTitle?: string;
   /** Project the item belongs to — needed to upload rotated/edited/pasted images. */
@@ -173,6 +177,7 @@ export function RichTextField({
       KeywordHighlight,
     ],
     content: value,
+    editable,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     editorProps: {
       attributes: {
@@ -185,7 +190,7 @@ export function RichTextField({
       // carries its URL under our own MIME type; a normal internal node move
       // (moved=true) is left to ProseMirror.
       handleDrop: (view, event, _slice, moved) => {
-        if (moved) return false;
+        if (!view.editable || moved) return false;
         const raw = event.dataTransfer?.getData('application/x-cw-image');
         if (!raw) return false;
         let data: { url?: string; name?: string; fullName?: string };
@@ -210,6 +215,7 @@ export function RichTextField({
       // library file, attach it to the item's Files field, and insert it inline —
       // instead of embedding a huge base64 blob in the content.
       handlePaste: (view, event) => {
+        if (!view.editable) return false;
         const { projectId: pid, onAttachFile: attach } = pasteCtx.current;
         const items = event.clipboardData?.items;
         if (!items || !pid) return false;
@@ -238,6 +244,7 @@ export function RichTextField({
       // context menu). Selects the image first so both actions target it.
       handleDOMEvents: {
         contextmenu: (view, event) => {
+          if (!view.editable) return false;
           const target = event.target as HTMLElement | null;
           if (!target || target.tagName !== 'IMG' || !view.dom.contains(target)) return false;
           event.preventDefault();
@@ -261,6 +268,12 @@ export function RichTextField({
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [fullscreen]);
+
+  // Reflect the read-only lock: TipTap keeps its own editable flag, so update it
+  // when the prop changes (e.g. the item moves into/out of a read-only status).
+  useEffect(() => {
+    editor?.setEditable(editable);
+  }, [editor, editable]);
 
   // Push the active highlight keywords into the editor's decoration plugin.
   // Joined into a stable string so the effect only fires when they actually change.
@@ -412,13 +425,16 @@ export function RichTextField({
   void onActivate;
   return (
     <div className={fullscreen ? 'fixed inset-0 z-[60] flex flex-col bg-white' : ''}>
-      <EditorToolbar
-        editor={editor}
-        docTitle={docTitle}
-        fullscreen={fullscreen}
-        onToggleFullscreen={() => setFullscreen((v) => !v)}
-        onUpload={uploadForDialog}
-      />
+      {/* No toolbar when the item is in a read-only status. */}
+      {editable && (
+        <EditorToolbar
+          editor={editor}
+          docTitle={docTitle}
+          fullscreen={fullscreen}
+          onToggleFullscreen={() => setFullscreen((v) => !v)}
+          onUpload={uploadForDialog}
+        />
+      )}
 
       {/* Floating toolbar over a selected image: rotate ×2 · Edit Image · Insert/Edit.
           Low z-index (40) so any dialog/editor (z-50+) covers it instead of it
@@ -426,7 +442,7 @@ export function RichTextField({
       <BubbleMenu
         editor={editor}
         pluginKey={`image-bubble-${bubbleKey}`}
-        shouldShow={({ editor }) => editor.isActive('image') || editor.isActive('figure')}
+        shouldShow={({ editor }) => editable && (editor.isActive('image') || editor.isActive('figure'))}
         tippyOptions={{ placement: 'top', zIndex: 40 }}
       >
         <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
@@ -452,7 +468,7 @@ export function RichTextField({
       <BubbleMenu
         editor={editor}
         pluginKey={`table-bubble-${bubbleKey}`}
-        shouldShow={({ editor }) => editor.isActive('table')}
+        shouldShow={({ editor }) => editable && editor.isActive('table')}
         tippyOptions={{ placement: 'top', zIndex: 40 }}
       >
         <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">

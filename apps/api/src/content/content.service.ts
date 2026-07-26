@@ -433,7 +433,9 @@ export class ContentService {
                   coalesce((select jsonb_agg(rr.role_id) from public.status_reviewing_roles rr where rr.status_id = s.id), '[]'::jsonb) as reviewing_role_ids,
                   coalesce((select jsonb_agg(jsonb_build_object('id', pr.id, 'name', pr.full_name) order by pr.full_name)
                             from public.item_status_assignees a join public.profiles pr on pr.id = a.profile_id
-                            where a.item_id = $1 and a.status_id = s.id), '[]'::jsonb) as assignees
+                            where a.item_id = $1 and a.status_id = s.id), '[]'::jsonb) as assignees,
+                  (select min(a.due_at) from public.item_status_assignees a
+                    where a.item_id = $1 and a.status_id = s.id) as due_at
              from public.workflow_statuses s where s.project_id = $2 order by s.position`,
           [itemId, item.project_id],
         )
@@ -441,9 +443,11 @@ export class ContentService {
 
       const members = (
         await c.query(
-          `select pr.id, pr.full_name as name, pr.role_id
-             from public.project_members pm join public.profiles pr on pr.id = pm.profile_id
-            where pm.project_id = $1 order by pr.full_name`,
+          `select pr.id, pr.full_name as name, pr.role_id, ro.name as role_name
+             from public.project_members pm
+             join public.profiles pr on pr.id = pm.profile_id
+             join public.roles ro on ro.id = pr.role_id
+            where pm.project_id = $1 order by ro.name, pr.full_name`,
           [item.project_id],
         )
       ).rows;
@@ -453,17 +457,19 @@ export class ContentService {
   }
 
   /**
-   * Replace the item's assignees for one status (manage_people_and_deadlines).
-   * RLS enforces the permission and project membership.
+   * Replace the item's assignees (and their shared per-status due date) for one
+   * status (manage_people_and_deadlines). The due date lives on the assignee
+   * rows — the same value on each — since that's where the "Due" column and the
+   * overdue counts read it from. RLS enforces permission + project membership.
    */
-  async setStatusAssignees(user: UserContext, itemId: string, statusId: string, profileIds: string[]) {
+  async setStatusAssignees(user: UserContext, itemId: string, statusId: string, profileIds: string[], dueAt?: string | null) {
     try {
       return await this.db.withUser(user, async (c) => {
         await c.query(`delete from public.item_status_assignees where item_id = $1 and status_id = $2`, [itemId, statusId]);
         for (const pid of profileIds) {
           await c.query(
-            `insert into public.item_status_assignees (item_id, status_id, profile_id, org_id) values ($1, $2, $3, $4)`,
-            [itemId, statusId, pid, user.orgId],
+            `insert into public.item_status_assignees (item_id, status_id, profile_id, org_id, due_at) values ($1, $2, $3, $4, $5)`,
+            [itemId, statusId, pid, user.orgId, dueAt ?? null],
           );
         }
         return { ok: true as const };

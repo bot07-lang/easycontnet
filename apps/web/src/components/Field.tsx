@@ -88,11 +88,12 @@ function FieldShell({
 }
 
 function FilesField({
-  projectId, value, onChange,
+  projectId, value, onChange, readOnly = false,
 }: {
   projectId?: string;
   value: StoredFile[];
   onChange: (files: StoredFile[]) => void;
+  readOnly?: boolean;
 }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewUrl, setViewUrl] = useState<string | null>(null);
@@ -121,6 +122,7 @@ function FilesField({
   return (
     <div className="px-5 py-5">
       <div className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-4">
+        {!readOnly && (
         <button
           type="button"
           onClick={() => projectId && setDialogOpen(true)}
@@ -136,6 +138,7 @@ function FilesField({
             <span className="mt-2 block text-sm">Add files</span>
           </span>
         </button>
+        )}
 
         {value.map((f) => {
           const lib = byId.get(f.id);
@@ -172,9 +175,11 @@ function FilesField({
                       <path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14" />
                     </CardBtn>
                   </div>
-                  <CardBtn title="Remove" danger onClick={() => remove(f.id)}>
-                    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M10 11v6M14 11v6" />
-                  </CardBtn>
+                  {!readOnly && (
+                    <CardBtn title="Remove" danger onClick={() => remove(f.id)}>
+                      <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M10 11v6M14 11v6" />
+                    </CardBtn>
+                  )}
                 </div>
                 {isImage
                   ? <img src={url!} alt={f.name} className="absolute inset-0 h-full w-full object-contain p-2" />
@@ -284,7 +289,7 @@ function tooltipFor(f: StoredFile, lib?: LibraryFile): string {
 }
 
 export function Field({
-  field, onChange, activeFieldId, onActivate, docTitle, projectId, onAttachFile, highlightKeywords,
+  field, onChange, activeFieldId, onActivate, docTitle, projectId, onAttachFile, highlightKeywords, readOnly = false,
 }: {
   field: ContentField;
   onChange: (id: string, value: unknown) => void;
@@ -298,6 +303,8 @@ export function Field({
   onAttachFile?: (file: StoredFile) => void;
   /** Keywords to highlight in the body — only the main content field gets these. */
   highlightKeywords?: string[];
+  /** When the item is in a read-only status: display values but block all editing. */
+  readOnly?: boolean;
 }) {
   // Section fields hold no value and get no chrome.
   if (field.type === 'heading') {
@@ -321,7 +328,7 @@ export function Field({
     const stored = Array.isArray(field.value) ? (field.value as StoredFile[]) : [];
     return (
       <FieldShell field={field} value={null}>
-        <FilesField projectId={projectId} value={stored} onChange={(files) => set(files)} />
+        <FilesField projectId={projectId} value={stored} onChange={(files) => set(files)} readOnly={readOnly} />
       </FieldShell>
     );
   }
@@ -337,6 +344,7 @@ export function Field({
               <input
                 type={isRadio ? 'radio' : 'checkbox'}
                 name={field.id}
+                disabled={readOnly}
                 checked={selected.includes(choice)}
                 onChange={(e) =>
                   set(
@@ -347,7 +355,7 @@ export function Field({
                         : selected.filter((c) => c !== choice),
                   )
                 }
-                className="h-[18px] w-[18px] accent-blue-600"
+                className="h-[18px] w-[18px] accent-blue-600 disabled:opacity-60"
               />
               {choice}
             </label>
@@ -364,8 +372,9 @@ export function Field({
         <div className="px-5 py-5">
           <select
             value={selected}
+            disabled={readOnly}
             onChange={(e) => set([e.target.value])}
-            className="w-full rounded border border-slate-300 px-3 py-2.5 text-[15px] text-slate-800"
+            className="w-full rounded border border-slate-300 px-3 py-2.5 text-[15px] text-slate-800 disabled:bg-slate-50 disabled:text-slate-500"
           >
             <option value="">Select…</option>
             {field.choices?.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -382,8 +391,9 @@ export function Field({
           <input
             type="date"
             value={String(field.value ?? '')}
+            disabled={readOnly}
             onChange={(e) => set(e.target.value)}
-            className="rounded border border-slate-300 px-3 py-2.5 text-[15px] text-slate-800"
+            className="rounded border border-slate-300 px-3 py-2.5 text-[15px] text-slate-800 disabled:bg-slate-50 disabled:text-slate-500"
           />
         </div>
       </FieldShell>
@@ -400,16 +410,18 @@ export function Field({
               <input
                 type="url"
                 value={v.url ?? ''}
+                readOnly={readOnly}
                 onChange={(e) => set({ ...v, url: e.target.value })}
                 placeholder="Image URL"
-                className="w-full rounded border border-slate-300 px-3 py-2 text-[14px] text-slate-800"
+                className="w-full rounded border border-slate-300 px-3 py-2 text-[14px] text-slate-800 read-only:bg-slate-50"
               />
               <input
                 type="text"
                 value={v.alt ?? ''}
+                readOnly={readOnly}
                 onChange={(e) => set({ ...v, alt: e.target.value })}
                 placeholder="Alt text — describe the image for accessibility"
-                className="w-full rounded border border-slate-300 px-3 py-2 text-[14px] text-slate-800"
+                className="w-full rounded border border-slate-300 px-3 py-2 text-[14px] text-slate-800 read-only:bg-slate-50"
               />
             </div>
             <label
@@ -451,10 +463,11 @@ export function Field({
         <FieldShell field={field} value={field.value}>
           <textarea
             value={String(field.value ?? '')}
+            readOnly={readOnly}
             onChange={(e) => set(e.target.value)}
             rows={3}
             className="w-full resize-y border-0 px-5 py-4 text-[15px] text-slate-800
-                       focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+                       focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 read-only:bg-slate-50"
           />
         </FieldShell>
       );
@@ -473,6 +486,7 @@ export function Field({
           projectId={projectId}
           onAttachFile={onAttachFile}
           highlightKeywords={highlightKeywords}
+          editable={!readOnly}
         />
       </FieldShell>
     );
@@ -484,9 +498,10 @@ export function Field({
       <input
         type="text"
         value={String(field.value ?? '')}
+        readOnly={readOnly}
         onChange={(e) => set(e.target.value)}
         className="w-full border-0 px-5 py-4 text-[17px] text-slate-800 focus:outline-none
-                   focus:ring-2 focus:ring-inset focus:ring-blue-500"
+                   focus:ring-2 focus:ring-inset focus:ring-blue-500 read-only:bg-slate-50"
       />
     </FieldShell>
   );

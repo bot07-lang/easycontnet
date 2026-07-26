@@ -18,6 +18,7 @@ const TemplatesGrid = lazy(() => import('./components/TemplatesGrid').then((m) =
 const TemplateBuilder = lazy(() => import('./components/TemplateBuilder').then((m) => ({ default: m.TemplateBuilder })));
 const CategoriesPage = lazy(() => import('./components/CategoriesPage').then((m) => ({ default: m.CategoriesPage })));
 const FilesPage = lazy(() => import('./components/FilesPage').then((m) => ({ default: m.FilesPage })));
+const RolesPage = lazy(() => import('./components/RolesPage').then((m) => ({ default: m.RolesPage })));
 
 function LazyFallback() {
   return <p className="p-8 text-sm text-slate-400">Loading…</p>;
@@ -47,11 +48,18 @@ export default function App() {
     prevUserId.current = userId;
   }, [userId, qc]);
 
+  // Org-level view toggled from the title bar's "Team" menu (Roles). The project
+  // workspace is the default; opening Roles swaps it out.
+  const [view, setView] = useState<'workspace' | 'roles'>('workspace');
+
   return (
     <div className="min-h-screen bg-slate-100">
       <Toaster />
       <header className="flex items-center gap-4 bg-indigo-700 px-6 py-3 text-white">
-        <span className="font-semibold tracking-tight">Content Workflow</span>
+        <button type="button" onClick={() => setView('workspace')} className="font-semibold tracking-tight hover:opacity-90">
+          Content Workflow
+        </button>
+        {session && <TeamMenu active={view === 'roles'} onOpenRoles={() => setView('roles')} />}
         <div className="ml-auto">
           <DevSwitcher session={session} />
         </div>
@@ -61,8 +69,45 @@ export default function App() {
         <p className="p-10 text-slate-400">Loading…</p>
       ) : !session ? (
         <SignedOut />
+      ) : view === 'roles' ? (
+        <div className="h-[calc(100vh-52px)] overflow-y-auto bg-slate-100">
+          <Suspense fallback={<LazyFallback />}>
+            <RolesPage />
+          </Suspense>
+        </div>
       ) : (
         <Workspace key={session.user.id} />
+      )}
+    </div>
+  );
+}
+
+/** Title-bar "Team" dropdown → Roles (and future Users/Teams). */
+function TeamMenu({ active, onOpenRoles }: { active: boolean; onOpenRoles: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen((v) => !v)}
+              className={`flex items-center gap-1.5 rounded px-2 py-1 text-[15px] font-medium hover:bg-white/10 ${active ? 'bg-white/10' : ''}`}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13A4 4 0 0 1 16 11" /></svg>
+        Team
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-40 mt-1 w-44 overflow-hidden rounded-md border border-slate-200 bg-white py-1 text-slate-700 shadow-xl">
+          <button type="button" onClick={() => { setOpen(false); onOpenRoles(); }}
+                  className="flex w-full items-center gap-2.5 px-4 py-2 text-left text-[14px] hover:bg-slate-50">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>
+            Roles
+          </button>
+        </div>
       )}
     </div>
   );

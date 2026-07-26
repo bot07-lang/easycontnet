@@ -67,6 +67,9 @@ export const DEFAULT_WORKFLOW: readonly WorkflowStatusDefinition[] = [
     color: '#9ca3af',
     position: 4096,
     isTerminal: true,
+    // Read-only by default (matching EasyContent): an item that has come to rest
+    // is locked — it can be viewed but not edited.
+    readOnly: true,
     // Empty by design, and enforced by the database: nobody works on an item
     // that has come to rest.
     reviewingRoles: [],

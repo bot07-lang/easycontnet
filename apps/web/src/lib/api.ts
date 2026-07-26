@@ -174,11 +174,13 @@ export interface AssignmentStatus {
   read_only: boolean;
   reviewing_role_ids: string[];
   assignees: { id: string; name: string }[];
+  /** Shared per-status due date (ISO), or null. */
+  due_at: string | null;
 }
 export interface AssignmentInfo {
   currentStatusId: string | null;
   statuses: AssignmentStatus[];
-  members: { id: string; name: string; role_id: string }[];
+  members: { id: string; name: string; role_id: string; role_name: string }[];
 }
 
 export interface ItemVersion {
@@ -320,10 +322,10 @@ export const api = {
   restoreVersion: (id: string, versionId: string) =>
     request<{ ok: true }>(`/content/items/${id}/versions/${versionId}/restore`, { method: 'POST' }),
   getAssignmentInfo: (id: string) => request<AssignmentInfo>(`/content/items/${id}/assignment`),
-  setStatusAssignees: (id: string, statusId: string, profileIds: string[]) =>
+  setStatusAssignees: (id: string, statusId: string, profileIds: string[], dueAt?: string | null) =>
     request<{ ok: true }>(`/content/items/${id}/statuses/${statusId}/assignees`, {
       method: 'PUT',
-      body: JSON.stringify({ profileIds }),
+      body: JSON.stringify({ profileIds, dueAt: dueAt ?? null }),
     }),
   getWorkflow: (projectId: string) =>
     request<WorkflowConfig>(`/projects/${projectId}/workflow`),
@@ -451,7 +453,44 @@ export const api = {
   moveFile: (id: string, folder: string | null) =>
     request<{ ok: true }>(`/files/${id}`, { method: 'PATCH', body: JSON.stringify({ folder }) }),
   deleteFile: (id: string) => request<{ ok: true }>(`/files/${id}`, { method: 'DELETE' }),
+
+  /* ---- roles & permissions (Team → Roles) ---- */
+  listPermissionsCatalogue: () => request<PermissionDef[]>('/permissions'),
+  listRoles: () => request<Role[]>('/roles'),
+  createRole: (name: string, description: string) =>
+    request<{ id: string }>('/roles', { method: 'POST', body: JSON.stringify({ name, description }) }),
+  updateRole: (id: string, patch: { name?: string; description?: string | null; isActive?: boolean }) =>
+    request<{ ok: true }>(`/roles/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  setRolePermission: (id: string, key: string, on: boolean) =>
+    request<{ ok: true }>(`/roles/${id}/permissions`, { method: 'PUT', body: JSON.stringify({ key, on }) }),
+  reorderRoles: (order: { id: string; position: number }[]) =>
+    request<{ ok: true }>('/roles/reorder', { method: 'PUT', body: JSON.stringify({ order }) }),
+  duplicateRole: (id: string) => request<{ id: string }>(`/roles/${id}/duplicate`, { method: 'POST' }),
+  deleteRole: (id: string) => request<{ ok: true }>(`/roles/${id}`, { method: 'DELETE' }),
 };
+
+/** One entry in the universal permission catalogue (grouped + ordered). */
+export interface PermissionDef {
+  key: string;
+  group_name: string;
+  label: string;
+  description: string;
+  position: number;
+}
+
+/** An org-wide role plus the permission keys it holds. */
+export interface Role {
+  id: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  /** System roles (Admin, Writer) can't be deleted/deactivated. */
+  is_system: boolean;
+  /** Admin is not editable (name/permissions locked). */
+  is_editable: boolean;
+  position: number;
+  permissions: string[];
+}
 
 /** A file in a project's library, as returned by the API (url is short-lived). */
 export interface LibraryFile {

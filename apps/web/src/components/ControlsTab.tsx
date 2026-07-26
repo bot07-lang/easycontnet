@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ApiItem, type AssignmentStatus } from '../lib/api';
 import { getItemCategories, setItemCategories, getProjectCategories } from '../lib/categories-store';
+import { AssignDialog } from './AssignDialog';
 
 /**
  * The CONTROLS tab of the item editor's right rail — ITEM DETAILS + WORKFLOW,
@@ -31,7 +32,7 @@ function countOccurrences(text: string, kw: string): number {
 }
 
 export function ControlsTab({
-  item, projectId, onReload, onOpenTemplate, highlightKeywords, onSetHighlight, mainContentText,
+  item, projectId, onReload, onOpenTemplate, highlightKeywords, onSetHighlight, mainContentText, onBeforeStatusChange,
 }: {
   item: ApiItem;
   projectId?: string;
@@ -40,11 +41,14 @@ export function ControlsTab({
   highlightKeywords: string[];
   onSetHighlight: (keywords: string[]) => void;
   mainContentText: string;
+  /** Flush pending editor edits before a status change (avoids losing edits when
+   *  moving into a read-only status). */
+  onBeforeStatusChange?: () => Promise<void>;
 }) {
   const qc = useQueryClient();
   const assignment = useQuery({ queryKey: ['assignment', item.id], queryFn: () => api.getAssignmentInfo(item.id) });
   const changeStatus = useMutation({
-    mutationFn: (statusId: string) => api.changeItemStatus(item.id, statusId),
+    mutationFn: async (statusId: string) => { await onBeforeStatusChange?.(); return api.changeItemStatus(item.id, statusId); },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['assignment', item.id] });
       void qc.invalidateQueries({ queryKey: ['versions', item.id] });
@@ -58,6 +62,7 @@ export function ControlsTab({
 
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [briefOpen, setBriefOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
 
   // Brief edit mode (name / keywords / description) with Save/Cancel.
   const [editing, setEditing] = useState(false);
@@ -331,6 +336,7 @@ export function ControlsTab({
         <div className="px-4 py-4">
           <button
             type="button"
+            onClick={() => setAssignOpen(true)}
             className="mb-5 flex items-center gap-2 text-[14px] font-semibold text-blue-600 hover:underline"
             title="Assignees and deadlines"
           >
@@ -368,6 +374,8 @@ export function ControlsTab({
           />
         )}
       </section>
+
+      {assignOpen && <AssignDialog itemId={item.id} itemName={item.name} onClose={() => setAssignOpen(false)} />}
     </div>
   );
 }
@@ -424,9 +432,15 @@ function StatusRow({ status, isCurrent, isComplete, isLast, busy, onSelect }: {
           circle in the status colour, with a tick once the status is complete. */}
       <span
         className="absolute left-0 top-0.5 grid h-[19px] w-[19px] place-items-center rounded-full"
-        style={isCurrent ? { border: `3px solid ${status.color}`, background: 'white' } : { background: status.color }}
+        style={
+          // Passed → filled with a tick. Current → bold hollow ring. Not-yet-reached
+          // (incl. a read-only Completed) → thin hollow ring, never filled.
+          isComplete
+            ? { background: status.color }
+            : { border: `${isCurrent ? 3 : 2}px solid ${status.color}`, background: 'white' }
+        }
       >
-        {isComplete && !isCurrent && (
+        {isComplete && (
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4"><path d="M20 6 9 17l-5-5" /></svg>
         )}
       </span>
@@ -449,9 +463,17 @@ function StatusRow({ status, isCurrent, isComplete, isLast, busy, onSelect }: {
           </span>
         )}
         {status.read_only && (
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-400" aria-label="Read-only">
-            <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
-          </svg>
+          <span className="group relative ml-auto inline-flex">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-500" aria-label="Read-only">
+              <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
+            {/* Anchored to the right — the lock sits at the right edge of the rail,
+                so a centred tooltip would clip off-screen. */}
+            <span className="pointer-events-none absolute bottom-full right-0 z-30 mb-2 hidden w-60 rounded-md bg-slate-900 px-3 py-2 text-center text-[13px] leading-snug text-white group-hover:block">
+              This status is set as read-only. Content items in read-only statuses cannot be edited.
+              <span className="absolute right-2.5 top-full border-4 border-transparent border-t-slate-900" />
+            </span>
+          </span>
         )}
       </div>
 
@@ -502,7 +524,18 @@ function StatusChanger({ statuses, currentId, busy, onChange }: {
       >
         <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: current.color }} />
         <span className="flex-1 text-[15px] font-semibold text-slate-800">{busy ? 'Changing…' : current.name}</span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`text-slate-500 transition ${open ? 'rotate-180' : ''}`}>
+        {current.read_only && (
+          <span className="group relative inline-flex shrink-0">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-500" aria-label="Read-only">
+              <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
+            <span className="pointer-events-none absolute bottom-full right-0 z-30 mb-2 hidden w-60 rounded-md bg-slate-900 px-3 py-2 text-center text-[13px] leading-snug text-white group-hover:block">
+              This status is set as read-only. Content items in read-only statuses cannot be edited.
+              <span className="absolute right-2.5 top-full border-4 border-transparent border-t-slate-900" />
+            </span>
+          </span>
+        )}
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`shrink-0 text-slate-500 transition ${open ? 'rotate-180' : ''}`}>
           <path d="m6 9 6 6 6-6" />
         </svg>
       </button>

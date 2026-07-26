@@ -217,8 +217,36 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
 
   // Approval info drives the top-bar status dropdown (current status + ladder).
   const approval = useQuery({ queryKey: ['approval', item.id], queryFn: () => api.getApprovalInfo(item.id) });
+
+  // Whether the item's CURRENT status is read-only → the whole editor is locked.
+  // Assignment info carries per-status read_only + the current status; the query is
+  // shared (same key) with the Controls tab, so this adds no extra request.
+  const assignment = useQuery({ queryKey: ['assignment', item.id], queryFn: () => api.getAssignmentInfo(item.id) });
+  const readOnly = useMemo(() => {
+    const a = assignment.data;
+    if (!a?.currentStatusId) return false;
+    return a.statuses.find((s) => s.id === a.currentStatusId)?.read_only ?? false;
+  }, [assignment.data]);
+
+  // Flush any pending field edits NOW and wait for them. Called before a status
+  // change so moving an item INTO a read-only status saves the edits while it's
+  // still editable — instead of the debounced save landing after the lock and
+  // being rejected. Defined here (has the pending map) and shared with the
+  // Controls tab, whose ladder/pill can also change status.
+  const flushPending = async () => {
+    const entries = Object.entries(pending.current);
+    for (const [fieldId] of entries) clearTimeout(timers.current[fieldId]);
+    await Promise.all(entries.map(async ([fieldId, value]) => {
+      const ok = await saveManager.flushField(item.id, fieldId, value);
+      if (ok) {
+        delete pending.current[fieldId];
+        qc.setQueryData<ApiItem>(['item', item.id], (old) => (old ? patchFieldValue(old, fieldId, value) : old));
+      }
+    }));
+  };
+
   const changeStatus = useMutation({
-    mutationFn: (statusId: string) => api.changeItemStatus(item.id, statusId),
+    mutationFn: async (statusId: string) => { await flushPending(); return api.changeItemStatus(item.id, statusId); },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['item', item.id] });
       void qc.invalidateQueries({ queryKey: ['approval', item.id] });
@@ -309,6 +337,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
   };
 
   const onChange = (fieldId: string, value: unknown) => {
+    if (readOnly) return; // read-only status: never persist edits (UI is locked too)
     setValues((prev) => ({ ...prev, [fieldId]: value }));
     pending.current[fieldId] = value;
     setSave('saving');
@@ -432,6 +461,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
             current={approval.data?.currentStatus ?? (item.status ? { id: '', name: item.status.name, color: item.status.color } : null)}
             statuses={approval.data?.statuses ?? []}
             busy={changeStatus.isPending}
+            locked={readOnly}
             onChange={(id) => changeStatus.mutate(id)}
           />
           <div className="inline-flex items-center gap-2">
@@ -472,12 +502,25 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
               )}
             </div>
           </div>
-          <span className="ml-auto text-xs">
-            {save === 'saving' && <span className="text-slate-400">Saving…</span>}
-            {save === 'retrying' && <span className="text-amber-600">Reconnecting…</span>}
-            {save === 'saved' && <span className="text-green-600">Saved</span>}
-            {save === 'error' && <span className="text-red-600">Couldn’t save — your changes are kept locally</span>}
-          </span>
+          {/* No save-status indicator in a read-only status — nothing can be saved. */}
+          {!readOnly && (
+            <span className="ml-auto text-xs">
+              {save === 'saving' && <span className="text-slate-400">Saving…</span>}
+              {save === 'retrying' && <span className="text-amber-600">Reconnecting…</span>}
+              {save === 'saved' && <span className="text-green-600">Saved</span>}
+              {save === 'error' && <span className="text-red-600">Couldn’t save — your changes are kept locally</span>}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Read-only status banner — the item can be viewed but not edited. */}
+      {!preview && readOnly && (
+        <div className="flex items-center gap-2.5 border-b border-amber-200 bg-amber-50 px-5 py-3 text-[13px] font-medium text-amber-800">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <rect x="4" y="11" width="16" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+          </svg>
+          This status is set as read-only. Content items in read-only statuses cannot be edited.
         </div>
       )}
 
@@ -529,6 +572,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
                 projectId={projectId}
                 onAttachFile={attachFile}
                 highlightKeywords={f.id === mainFieldId ? highlightKeywords : undefined}
+                readOnly={readOnly}
               />
             );
           })
@@ -550,6 +594,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
         previewId={preview?.id ?? null}
         onPreview={(v) => setPreview(v ? { id: v.id, createdAt: v.created_at } : null)}
         onRestoreAsk={(v) => setRestoreTarget({ id: v.id, createdAt: v.created_at })}
+        onBeforeStatusChange={flushPending}
       />
 
 
@@ -604,7 +649,7 @@ function ReadOnlyField({ label, html }: { label: string; html: string }) {
  * three-dot menu (rename / restore).
  */
 function VersionsPanel({
-  item, projectId, onReload, onOpenItem, onOpenTemplate, tab, onTab, highlightKeywords, onSetHighlight, mainContentText, previewId, onPreview, onRestoreAsk,
+  item, projectId, onReload, onOpenItem, onOpenTemplate, tab, onTab, highlightKeywords, onSetHighlight, mainContentText, previewId, onPreview, onRestoreAsk, onBeforeStatusChange,
 }: {
   item: ApiItem;
   projectId?: string;
@@ -619,6 +664,7 @@ function VersionsPanel({
   previewId: string | null;
   onPreview: (v: ItemVersion | null) => void;
   onRestoreAsk: (v: ItemVersion) => void;
+  onBeforeStatusChange?: () => Promise<void>;
 }) {
   return (
     <aside className="w-80 shrink-0 rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -642,6 +688,7 @@ function VersionsPanel({
           highlightKeywords={highlightKeywords}
           onSetHighlight={onSetHighlight}
           mainContentText={mainContentText}
+          onBeforeStatusChange={onBeforeStatusChange}
         />
       ) : (
         <div className="grid place-items-center px-6 py-12 text-center text-[13px] text-slate-400">
@@ -854,11 +901,13 @@ function DateHeader({ label }: { label: string }) {
 /** The item's status shown as a dropdown in the top bar — pick a status to change
  *  it (any-to-any, like the Controls panel's changer). */
 function TopStatusSelect({
-  current, statuses, busy, onChange,
+  current, statuses, busy, locked, onChange,
 }: {
   current: { id: string; name: string; color: string } | null;
   statuses: { id: string; name: string; color: string }[];
   busy: boolean;
+  /** Current status is read-only → show a lock beside the name. */
+  locked?: boolean;
   onChange: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -876,6 +925,11 @@ function TopStatusSelect({
               className="inline-flex items-center gap-2 rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-800 hover:bg-slate-50 disabled:opacity-50">
         <span className="h-2.5 w-2.5 rounded-full" style={{ background: current.color }} />
         <span className="font-medium">{busy ? 'Changing…' : current.name}</span>
+        {locked && (
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-500" aria-label="Read-only">
+            <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+          </svg>
+        )}
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`text-slate-500 transition ${open ? 'rotate-180' : ''}`}><path d="m6 9 6 6 6-6" /></svg>
       </button>
       {open && statuses.length > 0 && (

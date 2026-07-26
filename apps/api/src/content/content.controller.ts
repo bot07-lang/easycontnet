@@ -196,9 +196,9 @@ export class ContentController {
     @CurrentUser() user: UserContext,
     @Param('id') id: string,
     @Param('statusId') statusId: string,
-    @Body() body: { profileIds?: string[] },
+    @Body() body: { profileIds?: string[]; dueAt?: string | null },
   ) {
-    return this.content.setStatusAssignees(user, id, statusId, body?.profileIds ?? []);
+    return this.content.setStatusAssignees(user, id, statusId, body?.profileIds ?? [], body?.dueAt ?? null);
   }
 
   // The field-save rule is "assigned to the current status OR holds

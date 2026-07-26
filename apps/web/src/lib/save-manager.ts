@@ -87,6 +87,30 @@ export function saveField(itemId: string, fieldId: string, value: unknown, cb?: 
   attempt(1);
 }
 
+/**
+ * Save one field NOW and await the result — used to flush a pending edit before
+ * an action that would otherwise lose it (e.g. moving the item into a read-only
+ * status, which the server then refuses to accept edits for). Cancels any
+ * pending retry chain for the field, supersedes it, and clears the stash on
+ * success. Resolves `true` if it committed, `false` if the save failed (the
+ * value stays stashed for later recovery).
+ */
+export async function flushField(itemId: string, fieldId: string, value: unknown): Promise<boolean> {
+  const k = memKey(itemId, fieldId);
+  const prev = chains.get(k);
+  if (prev?.timer) clearTimeout(prev.timer);
+  const token = ++tokenSeq;
+  chains.set(k, { token });
+  stash(itemId, fieldId, value);
+  try {
+    await api.saveField(itemId, fieldId, value);
+    if (chains.get(k)?.token === token) { chains.delete(k); unstash(itemId, fieldId); }
+    return true;
+  } catch {
+    return false; // leave it stashed; recovered on next load
+  }
+}
+
 /** Unsaved edits stashed for an item — used to recover + re-save on load. */
 export function recoverPending(itemId: string): { fieldId: string; value: unknown }[] {
   const prefix = `${LS_PREFIX}${itemId}::`;

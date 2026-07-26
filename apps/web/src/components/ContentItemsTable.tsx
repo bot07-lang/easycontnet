@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ItemSummary } from '../lib/api';
+import { AssignDialog } from './AssignDialog';
 import { CreateItemDialog } from './CreateItemDialog';
+import { getItemCategories, setItemCategories, getProjectCategories } from '../lib/categories-store';
 
 /** Column definitions. Title + Status are fixed (always shown, first). */
 type ColKey = 'people' | 'due' | 'template' | 'categories' | 'tags' | 'timeInStatus' | 'lastUpdated';
@@ -173,31 +175,65 @@ function Row({
   onOpen: () => void;
 }) {
   const [assign, setAssign] = useState(false);
+  const [catsOpen, setCatsOpen] = useState(false);
+  const [cats, setCats] = useState<string[]>(() => getItemCategories(item.id));
   const openAssign = (e: React.MouseEvent) => { e.stopPropagation(); setAssign(true); };
+  const openCats = (e: React.MouseEvent) => { e.stopPropagation(); setCatsOpen(true); };
   const cell = (k: ColKey) => {
     switch (k) {
       case 'people':
-        return item.people.length === 0 ? (
-          <button type="button" onClick={openAssign} title="Assign people"
-                  className="grid h-7 w-7 place-items-center rounded-full border border-dashed border-slate-300 text-slate-400 hover:border-slate-400 hover:text-slate-600">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.2" /><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6" /></svg>
-          </button>
-        ) : (
-          <button type="button" onClick={openAssign} title="Edit assignees" className="flex -space-x-2">
-            {item.people.slice(0, 3).map((p) => (
-              <span key={p.name} title={p.name}
-                    className="grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[10px] font-semibold text-white"
-                    style={{ background: avatarColor(p.name) }}>{initials(p.name)}</span>
-            ))}
+        // Avatars for who's assigned, plus a dashed add-person button that
+        // appears on row hover (always shown when nobody is assigned).
+        return (
+          <button type="button" onClick={openAssign} title={item.people.length ? 'Edit assignees' : 'Assign people'}
+                  className="flex items-center gap-1.5">
+            {item.people.length > 0 && (
+              <span className="flex -space-x-2">
+                {item.people.slice(0, 3).map((p) => (
+                  <span key={p.name} title={p.name}
+                        className="grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[11px] font-semibold text-white"
+                        style={{ background: avatarColor(p.name) }}>{p.name.trim().charAt(0).toUpperCase()}</span>
+                ))}
+              </span>
+            )}
+            <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border border-dashed border-slate-300 text-slate-500 transition hover:border-slate-500 hover:text-slate-700 ${item.people.length ? 'opacity-0 group-hover:opacity-100' : ''}`}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.2" /><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6" /></svg>
+            </span>
           </button>
         );
       case 'due':
-        return item.next_due_date ? new Date(item.next_due_date).toLocaleDateString() : <span className="text-slate-400">—</span>;
+        // The date if set (click to edit); otherwise a + on hover to set one.
+        return item.next_due_date ? (
+          <button type="button" onClick={openAssign} className="text-slate-700 hover:text-blue-600 hover:underline">
+            {new Date(item.next_due_date).toLocaleDateString()}
+          </button>
+        ) : (
+          <button type="button" onClick={openAssign} title="Set due date"
+                  className="grid h-7 w-7 place-items-center rounded-full text-blue-600 opacity-0 transition hover:bg-blue-50 group-hover:opacity-100">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>
+          </button>
+        );
       case 'template':
         return item.template_name ?? <span className="text-slate-400">—</span>;
       case 'lastUpdated':
         return new Date(item.updated_at).toLocaleDateString();
       case 'categories':
+        // Category pills, plus a + on hover to open the category picker.
+        return (
+          <button type="button" onClick={openCats} title="Change categories" className="flex items-center gap-1.5">
+            {cats.length > 0 && (
+              <span className="flex flex-wrap items-center gap-1">
+                {cats.slice(0, 2).map((c) => (
+                  <span key={c} className="whitespace-nowrap rounded-full border border-slate-200 px-2 py-0.5 text-[12px] text-slate-600">{c}</span>
+                ))}
+                {cats.length > 2 && <span className="text-[12px] text-slate-400">+{cats.length - 2}</span>}
+              </span>
+            )}
+            <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 ${cats.length ? 'opacity-0 group-hover:opacity-100' : ''}`}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
+            </span>
+          </button>
+        );
       case 'tags':
       case 'timeInStatus':
       default:
@@ -206,7 +242,7 @@ function Row({
   };
 
   return (
-    <tr className="cursor-pointer border-b border-slate-100 hover:bg-slate-50" onClick={onOpen}>
+    <tr className="group cursor-pointer border-b border-slate-100 hover:bg-slate-50" onClick={onOpen}>
       <td className="px-4 py-3">
         <TitleCell projectId={projectId} item={item} onOpen={onOpen} />
       </td>
@@ -221,9 +257,77 @@ function Row({
       {cols.map((k) => <td key={k} className="px-4 py-3 text-slate-700">{cell(k)}</td>)}
       <td className="px-4 py-3">
         <RowActions projectId={projectId} item={item} />
-        {assign && <AssignPeopleDialog projectId={projectId} item={item} onClose={() => setAssign(false)} />}
+        {assign && <AssignDialog itemId={item.id} itemName={item.name} onClose={() => setAssign(false)} />}
+        {catsOpen && (
+          <ChangeCategoriesDialog
+            projectId={projectId}
+            selected={cats}
+            onClose={() => setCatsOpen(false)}
+            onSaved={(next) => { setItemCategories(item.id, next); setCats(next); setCatsOpen(false); }}
+          />
+        )}
       </td>
     </tr>
+  );
+}
+
+/** Change an item's categories — a searchable multi-select of the project's
+ *  categories (frontend-only, from the shared categories store). */
+function ChangeCategoriesDialog({
+  projectId, selected, onSaved, onClose,
+}: {
+  projectId: string;
+  selected: string[];
+  onSaved: (next: string[]) => void;
+  onClose: () => void;
+}) {
+  const all = getProjectCategories(projectId);
+  const [sel, setSel] = useState<Set<string>>(new Set(selected));
+  const [q, setQ] = useState('');
+  const shown = all.filter((c) => !q.trim() || c.toLowerCase().includes(q.trim().toLowerCase()));
+  const toggle = (c: string) => setSel((prev) => { const n = new Set(prev); n.has(c) ? n.delete(c) : n.add(c); return n; });
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-900/40 p-6" onMouseDown={onClose} onClick={(e) => e.stopPropagation()}>
+      <div onMouseDown={(e) => e.stopPropagation()} className="w-[560px] max-w-full rounded-lg bg-white shadow-2xl">
+        <header className="flex items-center justify-between px-6 pt-5">
+          <h2 className="text-[22px] font-semibold text-slate-900">Change categories</h2>
+          <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded text-slate-500 hover:bg-slate-100">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </header>
+        <div className="px-6 py-5">
+          <p className="mb-4 text-[15px] text-slate-500">Note that previously existing data will be overridden.</p>
+          <div className="overflow-hidden rounded-md border border-slate-300">
+            <div className="border-b border-slate-200 px-4 py-3 text-[15px] text-slate-500">
+              {sel.size === 0 ? 'None selected' : `${sel.size} selected`}
+            </div>
+            <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-400"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search"
+                     className="flex-1 text-[15px] text-slate-800 focus:outline-none" />
+              {q && <button type="button" onClick={() => setQ('')} className="text-slate-400 hover:text-slate-600"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg></button>}
+            </div>
+            <div className="max-h-64 overflow-y-auto py-1">
+              {all.length === 0 ? (
+                <p className="px-4 py-6 text-center text-[14px] text-slate-400">No categories in this project yet.</p>
+              ) : shown.length === 0 ? (
+                <p className="px-4 py-6 text-center text-[14px] text-slate-400">No matches.</p>
+              ) : shown.map((c) => (
+                <label key={c} className="flex cursor-pointer items-center gap-3 px-4 py-2 text-[15px] text-slate-800 hover:bg-slate-50">
+                  <input type="checkbox" checked={sel.has(c)} onChange={() => toggle(c)} className="h-[18px] w-[18px] accent-blue-600" />
+                  {c}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+        <footer className="flex justify-end gap-3 px-6 py-4">
+          <button type="button" onClick={onClose} className="rounded-md bg-slate-100 px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-200">Cancel</button>
+          <button type="button" onClick={() => onSaved([...sel])} className="rounded-md bg-green-500 px-6 py-2.5 text-sm font-semibold text-white hover:bg-green-600">Save</button>
+        </footer>
+      </div>
+    </div>
   );
 }
 
@@ -347,7 +451,7 @@ function RowActions({
         <ChangeStatusDialog projectId={projectId} item={item} onClose={() => setChangeStatus(false)} />
       )}
       {assign && (
-        <AssignPeopleDialog projectId={projectId} item={item} onClose={() => setAssign(false)} />
+        <AssignDialog itemId={item.id} itemName={item.name} onClose={() => setAssign(false)} />
       )}
     </div>
   );
@@ -591,101 +695,6 @@ function ChangeStatusDialog({ projectId, item, onClose }: { projectId: string; i
   );
 }
 
-/**
- * Assign people per workflow status (manage_people_and_deadlines). Only members
- * whose role is a reviewing role for a given status can be assigned to it
- * (gate 3). Terminal status takes no assignees.
- */
-function AssignPeopleDialog({ projectId, item, onClose }: { projectId: string; item: ItemSummary; onClose: () => void }) {
-  const qc = useQueryClient();
-  const info = useQuery({ queryKey: ['assignment', item.id], queryFn: () => api.getAssignmentInfo(item.id) });
-  const [sel, setSel] = useState<Record<string, Set<string>>>({});
-
-  useEffect(() => {
-    if (!info.data) return;
-    const init: Record<string, Set<string>> = {};
-    for (const s of info.data.statuses) init[s.id] = new Set(s.assignees.map((a) => a.id));
-    setSel(init);
-  }, [info.data]);
-
-  const save = useMutation({
-    mutationFn: async () => {
-      const data = info.data!;
-      for (const s of data.statuses) {
-        if (s.is_terminal) continue;
-        const before = new Set(s.assignees.map((a) => a.id));
-        const now = sel[s.id] ?? new Set<string>();
-        const changed = before.size !== now.size || [...now].some((id) => !before.has(id));
-        if (changed) await api.setStatusAssignees(item.id, s.id, [...now]);
-      }
-    },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['items', projectId] });
-      void qc.invalidateQueries({ queryKey: ['assignment', item.id] });
-      void qc.invalidateQueries({ queryKey: ['dashboard'] });
-      onClose();
-    },
-  });
-
-  const toggle = (statusId: string, pid: string) =>
-    setSel((prev) => {
-      const next = { ...prev };
-      const set = new Set(next[statusId]);
-      set.has(pid) ? set.delete(pid) : set.add(pid);
-      next[statusId] = set;
-      return next;
-    });
-
-  const data = info.data;
-
-  return (
-    <Modal title="Assign people" onClose={onClose}
-           footer={
-             <>
-               <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
-               <button type="button" disabled={!data || save.isPending} onClick={() => save.mutate()}
-                       className="rounded-md bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40">
-                 {save.isPending ? 'Saving…' : 'Save'}
-               </button>
-             </>
-           }>
-      {info.isLoading || !data ? (
-        <p className="text-sm text-slate-400">Loading…</p>
-      ) : (
-        <div className="space-y-4">
-          <p className="text-[13px] text-slate-500">
-            Assignment is per status. Only members whose role can review a status appear under it.
-          </p>
-          {data.statuses.filter((s) => !s.is_terminal).map((s) => {
-            const assignable = data.members.filter((m) => s.reviewing_role_ids.includes(m.role_id));
-            return (
-              <div key={s.id}>
-                <div className="mb-1.5 flex items-center gap-2 text-[15px] font-medium text-slate-800">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: s.color }} />
-                  {s.name}
-                  {s.id === data.currentStatusId && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500">current</span>}
-                </div>
-                {assignable.length === 0 ? (
-                  <p className="pl-4 text-[13px] text-slate-400">No members have a reviewing role for this status.</p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-1 pl-1">
-                    {assignable.map((m) => (
-                      <label key={m.id} className="flex cursor-pointer items-center gap-2.5 rounded px-1 py-1 text-[14px] text-slate-800 hover:bg-slate-50">
-                        <input type="checkbox" checked={sel[s.id]?.has(m.id) ?? false} onChange={() => toggle(s.id, m.id)} className="h-4 w-4 accent-blue-600" />
-                        {m.name}
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {save.isError && <p className="mt-3 text-sm text-red-600">Couldn’t save — you may need the “manage people & deadlines” permission.</p>}
-    </Modal>
-  );
-}
 
 /**
  * Split "+ Item" button: the left half creates a single item; the chevron opens
@@ -780,7 +789,6 @@ function SortIcon({ active, dir }: { active: boolean; dir?: 'asc' | 'desc' }) {
   );
 }
 
-function initials(name: string) { return name.split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase(); }
 function avatarColor(name: string) {
   const palette = ['#e11d48', '#7c3aed', '#0891b2', '#ea580c', '#059669', '#4f46e5', '#db2777'];
   let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
