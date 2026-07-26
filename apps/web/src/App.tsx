@@ -17,6 +17,7 @@ const WorkflowSettings = lazy(() => import('./components/WorkflowSettings').then
 const TemplatesGrid = lazy(() => import('./components/TemplatesGrid').then((m) => ({ default: m.TemplatesGrid })));
 const TemplateBuilder = lazy(() => import('./components/TemplateBuilder').then((m) => ({ default: m.TemplateBuilder })));
 const CategoriesPage = lazy(() => import('./components/CategoriesPage').then((m) => ({ default: m.CategoriesPage })));
+const FilesPage = lazy(() => import('./components/FilesPage').then((m) => ({ default: m.FilesPage })));
 
 function LazyFallback() {
   return <p className="p-8 text-sm text-slate-400">Loading…</p>;
@@ -115,10 +116,21 @@ function Workspace() {
     window.history.replaceState(null, '', qs ? `?${qs}` : window.location.pathname);
   }, [showAll, projectId, nav, itemId, openTemplateId]);
 
+  // Open a project from the All Projects dashboard: land on Content.
   const selectProject = (id: string) => {
     setProjectId(id);
     setShowAll(false);
     setNav('content');
+    setItemId(null);
+    setOpenTemplateId(null);
+  };
+
+  // Switch the project from the sidebar selector: stay on the SAME tab (e.g.
+  // Categories → the other project's Categories), just drop the item/template
+  // that belonged to the previous project.
+  const switchProject = (id: string) => {
+    setProjectId(id);
+    setShowAll(false);
     setItemId(null);
     setOpenTemplateId(null);
   };
@@ -138,7 +150,7 @@ function Workspace() {
         activeNav={showAll ? null : nav}
         itemId={itemId}
         onAllProjects={() => { setShowAll(true); setItemId(null); }}
-        onSelectProject={selectProject}
+        onSelectProject={switchProject}
         onNavigate={(key) => { setShowAll(false); setNav(key); setItemId(null); }}
         onOpenItem={(id) => { setShowAll(false); setNav('content'); setItemId(id); }}
       />
@@ -152,7 +164,8 @@ function Workspace() {
             />
           </div>
         ) : (
-          <ProjectView projectId={projectId} nav={nav} itemId={itemId} onOpenItem={setItemId}
+          <ProjectView projectId={projectId} nav={nav} itemId={itemId}
+                       onOpenItem={(id) => { setNav('content'); setItemId(id); }}
                        onOpenTemplate={openTemplate} openTemplateId={openTemplateId} onSetTemplate={setOpenTemplateId} />
         )}
       </div>
@@ -197,12 +210,22 @@ function ProjectView({
     );
   }
 
+  if (nav === 'files') {
+    return (
+      <div className="h-full overflow-y-auto p-6">
+        <Suspense fallback={<LazyFallback />}>
+          <FilesPage projectId={projectId} onOpenItem={(id) => onOpenItem(id)} />
+        </Suspense>
+      </div>
+    );
+  }
+
   if (nav === 'templates') {
     return (
       <div className="h-full overflow-y-auto p-6">
         <Suspense fallback={<LazyFallback />}>
           {openTemplateId ? (
-            <TemplateBuilder templateId={openTemplateId} onBack={() => onSetTemplate(null)} />
+            <TemplateBuilder templateId={openTemplateId} onBack={() => onSetTemplate(null)} onOpenTemplate={onSetTemplate} />
           ) : (
             <TemplatesGrid projectId={projectId} onOpenTemplate={onSetTemplate} />
           )}

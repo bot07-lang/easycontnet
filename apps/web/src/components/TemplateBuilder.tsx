@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type TemplateDetail, type TemplateField, type TemplateTab } from '../lib/api';
+import { Modal, inputClass } from './Modal';
 
 /* ---------------------------------------------------- field-type metadata */
 
@@ -31,7 +32,7 @@ const ADD_MENU: { group: string; types: string[] }[] = [
  * (debounced); structural changes (add/delete/move/tabs) refetch. Mirrors the
  * reference builder.
  */
-export function TemplateBuilder({ templateId, onBack }: { templateId: string; onBack: () => void }) {
+export function TemplateBuilder({ templateId, onBack, onOpenTemplate }: { templateId: string; onBack: () => void; onOpenTemplate?: (id: string) => void }) {
   const qc = useQueryClient();
   const tpl = useQuery({ queryKey: ['template', templateId], queryFn: () => api.getTemplate(templateId) });
   const [tabId, setTabId] = useState<string | null>(null);
@@ -45,7 +46,7 @@ export function TemplateBuilder({ templateId, onBack }: { templateId: string; on
 
   return (
     <div className="mx-auto max-w-[1040px]">
-      <Header template={t} onBack={onBack} onRenamed={invalidate} />
+      <Header template={t} onBack={onBack} onRenamed={invalidate} onOpenTemplate={onOpenTemplate} />
 
       <div className="mt-5 rounded-lg border border-slate-200 bg-white">
         <TabBar template={t} activeId={activeTab?.id ?? null} onSelect={setTabId} onChanged={invalidate} />
@@ -71,11 +72,25 @@ export function TemplateBuilder({ templateId, onBack }: { templateId: string; on
 
 /* ---------------------------------------------------------------- header */
 
-function Header({ template: t, onBack, onRenamed }: { template: TemplateDetail; onBack: () => void; onRenamed: () => void }) {
+function Header({ template: t, onBack, onRenamed, onOpenTemplate }: { template: TemplateDetail; onBack: () => void; onRenamed: () => void; onOpenTemplate?: (id: string) => void }) {
+  const qc = useQueryClient();
   const [name, setName] = useState(t.name);
   const [desc, setDesc] = useState(t.description ?? '');
+  const nameRef = useRef<HTMLInputElement>(null);
   const saveName = useDebounced((v: string) => { if (v.trim()) api.updateTemplate(t.id, { name: v.trim() }).then(onRenamed).catch(() => {}); });
   const saveDesc = useDebounced((v: string) => { api.updateTemplate(t.id, { description: v.trim() || null }).then(onRenamed).catch(() => {}); });
+
+  const [menu, setMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useOutside(menuRef, () => setMenu(false), menu);
+  const [creating, setCreating] = useState(false);
+  const [cloning, setCloning] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const refreshList = () => qc.invalidateQueries({ queryKey: ['templates', t.projectId] });
+  const setDefault = useMutation({ mutationFn: () => api.updateTemplate(t.id, { isDefault: true }), onSuccess: () => { onRenamed(); refreshList(); } });
+  const duplicate = useMutation({ mutationFn: () => api.duplicateTemplate(t.id), onSuccess: (res) => { refreshList(); onOpenTemplate?.(res.id); } });
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-center gap-3">
@@ -83,18 +98,134 @@ function Header({ template: t, onBack, onRenamed }: { template: TemplateDetail; 
                 className="grid h-9 w-9 place-items-center rounded text-slate-500 hover:bg-slate-100">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
         </button>
-        <input value={name} onChange={(e) => { setName(e.target.value); saveName(e.target.value); }}
+        <input ref={nameRef} value={name} onChange={(e) => { setName(e.target.value); saveName(e.target.value); }}
                className="w-[360px] max-w-full rounded-md border border-slate-300 px-3 py-2 text-[16px] font-medium text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100" />
         {t.isDefault && <span className="rounded border border-slate-300 px-2 py-0.5 text-[12px] font-medium text-slate-600">Default</span>}
-        <button type="button" onClick={onBack}
+        <button type="button" onClick={() => setCreating(true)}
                 className="ml-auto rounded-md border border-slate-300 px-4 py-2 text-[13px] font-semibold uppercase tracking-wide text-slate-600 hover:bg-slate-50">
           + Create template
         </button>
+        <div ref={menuRef} className="relative">
+          <button type="button" onClick={() => setMenu((v) => !v)} title="Actions"
+                  className="grid h-9 w-9 place-items-center rounded-full text-slate-500 hover:bg-slate-100">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" /></svg>
+          </button>
+          {menu && (
+            <div className="absolute right-0 z-30 mt-1 w-60 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl">
+              {!t.isDefault && <MenuRow icon={MenuIcons.makeDefault} label="Make default" onClick={() => { setMenu(false); setDefault.mutate(); }} />}
+              <MenuRow icon={MenuIcons.duplicate} label="Duplicate template" onClick={() => { setMenu(false); duplicate.mutate(); }} />
+              <MenuRow icon={MenuIcons.rename} label="Rename" onClick={() => { setMenu(false); nameRef.current?.focus(); nameRef.current?.select(); }} />
+              <MenuRow icon={MenuIcons.clone} label="Clone into another project" onClick={() => { setMenu(false); setCloning(true); }} />
+              <div className="my-1 border-t border-slate-100" />
+              <MenuRow icon={MenuIcons.trash} label="Delete" danger onClick={() => { setMenu(false); setDeleting(true); }} />
+            </div>
+          )}
+        </div>
       </div>
       <input value={desc} onChange={(e) => { setDesc(e.target.value); saveDesc(e.target.value); }}
              placeholder="Template description (optional)"
              className="ml-12 mt-2 w-[min(100%-3rem,42rem)] rounded-md border border-transparent px-2 py-1 text-[14px] text-slate-500 placeholder:text-slate-400 hover:border-slate-200 focus:border-blue-500 focus:text-slate-700 focus:outline-none" />
+
+      {creating && (
+        <CreateTemplateModal projectId={t.projectId}
+                             onClose={() => setCreating(false)}
+                             onCreated={(id) => { setCreating(false); refreshList(); onOpenTemplate?.(id); }} />
+      )}
+      {cloning && <CloneTemplateModal templateId={t.id} templateName={t.name} projectId={t.projectId} onClose={() => setCloning(false)} />}
+      {deleting && <DeleteTemplateModal templateId={t.id} templateName={t.name} onClose={() => setDeleting(false)} onDeleted={onBack} />}
     </div>
+  );
+}
+
+function MenuRow({ icon, label, danger, onClick }: { icon: React.ReactNode; label: string; danger?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+            className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-[14px] ${danger ? 'text-red-600 hover:bg-red-50' : 'text-slate-700 hover:bg-slate-50'}`}>
+      <span className="shrink-0">{icon}</span>{label}
+    </button>
+  );
+}
+
+const MenuIcons = {
+  makeDefault: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M12 8v8M8 12h8" /></svg>,
+  duplicate: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>,
+  rename: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>,
+  clone: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M5 12h14M13 6l6 6-6 6" /></svg>,
+  trash: <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" /></svg>,
+};
+
+function CreateTemplateModal({ projectId, onClose, onCreated }: { projectId: string; onClose: () => void; onCreated: (id: string) => void }) {
+  const [name, setName] = useState('');
+  const [desc, setDesc] = useState('');
+  const create = useMutation({ mutationFn: () => api.createTemplate(projectId, name.trim(), desc.trim() || null), onSuccess: (res) => onCreated(res.id) });
+  return (
+    <Modal title="Create template" onClose={onClose} width={460}
+           footer={<>
+             <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+             <button type="button" disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}
+                     className="rounded-md bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40">{create.isPending ? 'Creating…' : 'Create'}</button>
+           </>}>
+      <label className="mb-3 block">
+        <span className="mb-1.5 block text-[15px] font-medium text-slate-700">Template name</span>
+        <input autoFocus className={inputClass} value={name} onChange={(e) => setName(e.target.value)}
+               onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) create.mutate(); }} placeholder="e.g. Blog Post" />
+      </label>
+      <label className="block">
+        <span className="mb-1.5 block text-[15px] font-medium text-slate-700">Description (optional)</span>
+        <input className={inputClass} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="What this template is for" />
+      </label>
+      {create.isError && <p className="mt-3 text-sm text-red-600">Couldn’t create — you may not have permission.</p>}
+    </Modal>
+  );
+}
+
+function CloneTemplateModal({ templateId, templateName, projectId, onClose }: { templateId: string; templateName: string; projectId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
+  const targets = (projects.data ?? []).filter((p) => p.id !== projectId);
+  const [targetId, setTargetId] = useState('');
+  if (!targetId && targets.length) setTargetId(targets[0]!.id);
+  const [done, setDone] = useState(false);
+  const clone = useMutation({ mutationFn: () => api.cloneTemplateToProject(templateId, targetId), onSuccess: (res) => { void qc.invalidateQueries({ queryKey: ['templates', res.projectId] }); setDone(true); } });
+  const targetName = targets.find((p) => p.id === targetId)?.name;
+  return (
+    <Modal title="Clone into another project" onClose={onClose} width={460}
+           footer={done ? (
+             <button type="button" onClick={onClose} className="rounded-md bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700">Done</button>
+           ) : (<>
+             <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+             <button type="button" disabled={!targetId || clone.isPending} onClick={() => clone.mutate()}
+                     className="rounded-md bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40">{clone.isPending ? 'Cloning…' : 'Clone'}</button>
+           </>)}>
+      {done ? (
+        <p className="text-[15px] text-slate-600"><span className="font-medium text-slate-800">{templateName}</span> was cloned into <span className="font-medium text-slate-800">{targetName}</span>.</p>
+      ) : targets.length === 0 ? (
+        <p className="text-[15px] text-slate-500">You don’t have another project to clone this into.</p>
+      ) : (
+        <label className="block">
+          <span className="mb-1.5 block text-[15px] font-medium text-slate-700">Target project</span>
+          <select value={targetId} onChange={(e) => setTargetId(e.target.value)} className={inputClass}>
+            {targets.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          {clone.isError && <p className="mt-3 text-sm text-red-600">Couldn’t clone — you may not manage templates in that project.</p>}
+        </label>
+      )}
+    </Modal>
+  );
+}
+
+function DeleteTemplateModal({ templateId, templateName, onClose, onDeleted }: { templateId: string; templateName: string; onClose: () => void; onDeleted: () => void }) {
+  const del = useMutation({ mutationFn: () => api.deleteTemplate(templateId), onSuccess: onDeleted });
+  return (
+    <Modal title="Delete template?" onClose={onClose} width={440}
+           footer={<>
+             <button type="button" onClick={onClose} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+             <button type="button" disabled={del.isPending} onClick={() => del.mutate()}
+                     className="rounded-md bg-red-600 px-5 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-40">{del.isPending ? 'Deleting…' : 'Delete'}</button>
+           </>}>
+      <p className="text-[15px] text-slate-600"><span className="font-medium text-slate-800">{templateName}</span> and its tabs and fields will be permanently removed.</p>
+      {del.isError && <p className="mt-3 text-sm text-red-600">Couldn’t delete — it may still be in use by content items.</p>}
+    </Modal>
   );
 }
 

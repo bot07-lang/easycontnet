@@ -504,7 +504,7 @@ function linkedLabel(items: { name: string }[]): string {
   return `Linked to ${items.length} items`;
 }
 
-function timeAgo(iso: string): string {
+export function timeAgo(iso: string): string {
   const secs = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
   const mins = Math.floor(secs / 60);
   const hrs = Math.floor(mins / 60);
@@ -515,7 +515,7 @@ function timeAgo(iso: string): string {
   return 'just now';
 }
 
-function ext(name: string): string {
+export function ext(name: string): string {
   return name.match(/\.(\w+)$/)?.[1] ?? 'file';
 }
 /**

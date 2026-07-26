@@ -23,7 +23,7 @@
 /* Resize frame around an editable image (plain or captioned): the image sits in
    a positioned wrapper carrying four draggable corner handles that appear only
    when the node is selected — matching the reference. */
-.prose-editor .cw-img-wrap { position: relative; display: inline-block; line-height: 0; max-width: 100%; }
+.prose-editor .cw-img-wrap { position: relative; display: inline-block; line-height: 0; max-width: 100%; vertical-align: middle; }
 .prose-editor figure.image .cw-img-wrap { display: block; }
 .prose-editor .cw-img-wrap.ProseMirror-selectednode img { outline: 2px solid #4f9bf5; outline-offset: 2px; }
 .prose-editor .cw-resize-handle {
@@ -57,7 +57,8 @@
 .prose-editor figure.image.ProseMirror-selectednode,
 .prose-editor figure.image:focus-within { outline: 2px solid #4f9bf5; outline-offset: 2px; }
 .prose-editor blockquote {
-  border-left: 3px solid #cbd5e1; padding: .4rem 1rem; margin: 1rem 0; color: #475569;
+  border-left: 3px solid #9ca3af; padding: .1rem 0 .1rem 1.6rem; margin: 1rem 0;
+  color: #6b7280; font-style: italic;
 }
 /* Kill the inner paragraph's margins so they don't collapse out of the quote and
    clip the nested block in show-blocks. */

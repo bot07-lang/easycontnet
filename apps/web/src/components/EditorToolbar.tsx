@@ -1,6 +1,7 @@
 import type { Editor } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react';
 import { getMarkRange } from '@tiptap/core';
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useId, useReducer, useRef, useState } from 'react';
 import { BlockTypeMenu, ColorPalette } from './toolbar-parts';
 import { ImageDialog, type ImageValue } from './ImageDialog';
 import { ColorPickerDialog } from './ColorPickerDialog';
@@ -54,6 +55,39 @@ function Btn({
 
 function Divider() {
   return <div className="mx-1 h-6 w-px bg-slate-300" />;
+}
+
+/** A button in the floating selection bubble. `caret` appends a small dropdown
+ *  arrow (for the table-size picker). */
+function BubBtn({
+  title, active, disabled, caret, onClick, children,
+}: {
+  title: string;
+  active?: boolean;
+  disabled?: boolean;
+  caret?: boolean;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      onMouseDown={(e) => e.preventDefault()} // keep the editor selection
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        'flex h-8 min-w-8 items-center justify-center gap-0.5 rounded px-1.5 text-slate-700 transition',
+        disabled ? 'cursor-not-allowed opacity-30' : 'hover:bg-slate-100',
+        active ? 'bg-slate-200' : '',
+      ].join(' ')}
+    >
+      {children}
+      {caret && <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z" /></svg>}
+    </button>
+  );
 }
 
 function Icon({ children, size = 18 }: { children: React.ReactNode; size?: number }) {
@@ -125,6 +159,7 @@ export function EditorToolbar({
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkInit, setLinkInit] = useState<LinkValues>({ url: '', text: '', title: '', target: '' });
   const [insertSub, setInsertSub] = useState<'table' | null>(null);
+  const bubbleKey = useId(); // unique BubbleMenu plugin key for the selection menu
   // View › Visual aids defaults on (table guides visible); Show blocks off.
   const [visualAids, setVisualAids] = useState(true);
   const [showBlocks, setShowBlocks] = useState(false);
@@ -343,15 +378,63 @@ export function EditorToolbar({
 
   return (
     <div className="border-b border-slate-200 bg-slate-50">
-      {imageOpen && (
-        <ImageDialog onClose={() => setImageOpen(false)} onSave={insertImage} onUpload={onUpload} />
-      )}
-      {/* Custom colour picker dialog (opened from the menu colour grids). */}
-      {colorPicker && (
-        <ColorPickerDialog initial="#000000"
-                           onClose={() => setColorPicker(null)}
-                           onSave={(c) => { colorPicker.apply(c); setColorPicker(null); }} />
-      )}
+      {/* Selection bubble — appears over a non-empty text selection (matching the
+          reference): bold / italic · link · H2 · H3 · quote · image · table ·
+          comment. Not shown on an image/figure/table (those have their own
+          floating toolbars). */}
+      <BubbleMenu
+        editor={editor}
+        pluginKey={`text-bubble-${bubbleKey}`}
+        shouldShow={({ editor, state }) => {
+          if (state.selection.empty) return false;
+          if (editor.isActive('image') || editor.isActive('figure') || editor.isActive('table')) return false;
+          return editor.isEditable;
+        }}
+        tippyOptions={{ placement: 'top', zIndex: 45, maxWidth: 'none' }}
+      >
+        <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+          <BubBtn title="Bold" active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()}>
+            <span className="text-[15px] font-bold">B</span>
+          </BubBtn>
+          <BubBtn title="Italic" active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()}>
+            <span className="font-serif text-[15px] italic">I</span>
+          </BubBtn>
+          <span className="mx-1 h-6 w-px bg-slate-200" />
+
+          <BubBtn title="Insert/edit link" active={editor.isActive('link')} onClick={openLink}>
+            <Icon>{I.link}</Icon>
+          </BubBtn>
+          <BubBtn title="Heading 2" active={editor.isActive('heading', { level: 2 })}
+                  onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
+            <span className="text-[13px] font-semibold">H2</span>
+          </BubBtn>
+          <BubBtn title="Heading 3" active={editor.isActive('heading', { level: 3 })}
+                  onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>
+            <span className="text-[13px] font-semibold">H3</span>
+          </BubBtn>
+          <BubBtn title="Blockquote" active={editor.isActive('blockquote')}
+                  onClick={() => editor.chain().focus().toggleBlockquote().run()}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 17h3l2-4V7H5v6h3l-2 4zm8 0h3l2-4V7h-6v6h3l-2 4z" /></svg>
+          </BubBtn>
+          <BubBtn title="Insert/edit image" onClick={() => setImageOpen(true)}>
+            <Icon>{I.image}</Icon>
+          </BubBtn>
+          {/* Full Table menu (Table size grid / Cell / Row / Column / properties /
+              delete) — the same dropdown as the toolbar, matching the reference. */}
+          <TableMenu editor={editor} />
+          <span className="mx-1 h-6 w-px bg-slate-200" />
+
+          {/* Comments are Phase 2 — shown to match the reference, disabled for now. */}
+          <BubBtn title="Add a comment — coming in Phase 2" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
+              <line x1="12" y1="8" x2="12" y2="13" /><line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
+            </svg>
+          </BubBtn>
+        </div>
+      </BubbleMenu>
+
       {/* Menu bar */}
       <div ref={menuBarRef} className="flex items-center gap-1 border-b border-slate-200 px-2 py-1.5">
         {MENUS.map((m) => (
@@ -747,6 +830,19 @@ export function EditorToolbar({
       {linkOpen && <LinkDialog initial={linkInit} onSave={applyLink} onClose={() => setLinkOpen(false)} />}
       {mediaOpen && <MediaDialog onSave={applyMedia} onClose={() => setMediaOpen(false)} />}
       {findOpen && <FindReplaceDialog editor={editor} onClose={() => setFindOpen(false)} />}
+
+      {/* Insert Image dialog + custom colour picker — rendered LAST, AFTER the
+          BubbleMenu. A conditional sibling placed BEFORE the tippy-relocated
+          BubbleMenu element crashes React reconciliation (insertBefore /
+          NotFoundError); appending at the end avoids that. */}
+      {imageOpen && (
+        <ImageDialog onClose={() => setImageOpen(false)} onSave={insertImage} onUpload={onUpload} />
+      )}
+      {colorPicker && (
+        <ColorPickerDialog initial="#000000"
+                           onClose={() => setColorPicker(null)}
+                           onSave={(c) => { colorPicker.apply(c); setColorPicker(null); }} />
+      )}
     </div>
   );
 }

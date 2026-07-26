@@ -18,7 +18,7 @@ export const IMPLEMENTED: Record<NavKey, boolean> = {
   dashboard: false,
   content: true,
   briefs: false,
-  files: false,
+  files: true,
   documentation: false,
   workflow: true,
   templates: true,
