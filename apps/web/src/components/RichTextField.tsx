@@ -277,7 +277,7 @@ export function RichTextField({
 
   // Push the active highlight keywords into the editor's decoration plugin.
   // Joined into a stable string so the effect only fires when they actually change.
-  const kwSig = (highlightKeywords ?? []).join(' ');
+  const kwSig = (highlightKeywords ?? []).join(' ');
   useEffect(() => {
     if (!editor) return;
     editor.view.dispatch(editor.state.tr.setMeta(keywordHighlightKey, { keywords: highlightKeywords ?? [] }));
@@ -425,16 +425,13 @@ export function RichTextField({
   void onActivate;
   return (
     <div className={fullscreen ? 'fixed inset-0 z-[60] flex flex-col bg-white' : ''}>
-      {/* No toolbar when the item is in a read-only status. */}
-      {editable && (
-        <EditorToolbar
-          editor={editor}
-          docTitle={docTitle}
-          fullscreen={fullscreen}
-          onToggleFullscreen={() => setFullscreen((v) => !v)}
-          onUpload={uploadForDialog}
-        />
-      )}
+      {/* The two BubbleMenus below are relocated to document.body by tippy, so any
+          CONDITIONAL sibling rendered BEFORE them (e.g. the toolbar, which only
+          mounts when editable) makes React insertBefore against a node that is no
+          longer a child of this div → "Failed to execute 'insertBefore'". The
+          toolbar is therefore rendered AFTER the BubbleMenus (its insertion
+          reference becomes the stable .rt-body div). Tippy portals the menus, so
+          this reorder does not change what the user sees. */}
 
       {/* Floating toolbar over a selected image: rotate ×2 · Edit Image · Insert/Edit.
           Low z-index (40) so any dialog/editor (z-50+) covers it instead of it
@@ -500,6 +497,19 @@ export function RichTextField({
           </ImgBtn>
         </div>
       </BubbleMenu>
+
+      {/* Toolbar stays MOUNTED even in a read-only status — it just greys out and
+          stops responding (disabled). Unmounting it would churn the DOM next to
+          the portaled BubbleMenus above and can crash React reconciliation
+          (the "insertBefore" error), so we toggle disabled instead. */}
+      <EditorToolbar
+        editor={editor}
+        docTitle={docTitle}
+        fullscreen={fullscreen}
+        onToggleFullscreen={() => setFullscreen((v) => !v)}
+        onUpload={uploadForDialog}
+        disabled={!editable}
+      />
 
       <div className={`rt-body ${fullscreen ? 'flex-1 overflow-y-auto' : ''}`}>
         <EditorContent editor={editor} />

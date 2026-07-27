@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ItemSummary } from '../lib/api';
 import { AssignDialog } from './AssignDialog';
@@ -396,6 +397,37 @@ function buildFilterChips(adv: AdvFilters, setAdv: (fn: (p: AdvFilters) => AdvFi
   return chips;
 }
 
+/** Fast tooltip for a possibly-truncated title: shows the full name after a
+ *  short delay (unlike the ~1s native `title`), and only when actually cut off.
+ *  Portal-rendered so the table's overflow can't clip it. */
+function TitleTip({ text, children }: { text: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const show = () => {
+    const btn = ref.current?.querySelector('button');
+    if (!btn) return;
+    // Only bother when the title is actually cut off.
+    if (btn.scrollWidth - btn.clientWidth < 2) return;
+    const r = btn.getBoundingClientRect();
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setPos({ x: Math.round(r.left), y: Math.round(r.bottom + 4) }), 120);
+  };
+  const hide = () => { clearTimeout(timer.current); setPos(null); };
+  return (
+    <span ref={ref} className="inline-flex min-w-0" onMouseEnter={show} onMouseLeave={hide}>
+      {children}
+      {pos && createPortal(
+        <div style={{ position: 'fixed', left: pos.x, top: pos.y, zIndex: 60 }}
+             className="max-w-[380px] rounded-md bg-slate-900 px-3 py-2 text-[13px] leading-snug text-white shadow-xl">
+          {text}
+        </div>,
+        document.body,
+      )}
+    </span>
+  );
+}
+
 function Row({
   projectId, item, cols, onOpen,
 }: {
@@ -425,6 +457,12 @@ function Row({
                           className="grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[11px] font-semibold text-white"
                           style={{ background: avatarColor(p.name) }}>{avatarInitial(p.name)}</span>
                   ))}
+                  {item.people.length > 3 && (
+                    <span title={item.people.slice(3).map((p) => p.name).join(', ')}
+                          className="grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-semibold text-slate-600">
+                      +{item.people.length - 3}
+                    </span>
+                  )}
                 </span>
               )}
               <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border border-dashed border-slate-300 text-slate-500 transition hover:border-slate-500 hover:text-slate-700 ${item.people.length ? 'opacity-0 group-hover:opacity-100' : ''}`}>
@@ -435,15 +473,21 @@ function Row({
         );
       case 'due':
         // The date if set (click to edit); otherwise a + on hover to set one.
-        return item.next_due_date ? (
-          <button type="button" onClick={openAssign} className="text-slate-700 hover:text-blue-600 hover:underline">
-            {new Date(item.next_due_date).toLocaleDateString()}
-          </button>
-        ) : (
-          <button type="button" onClick={openAssign} title="Set due date"
-                  className="grid h-7 w-7 place-items-center rounded-full text-blue-600 opacity-0 transition hover:bg-blue-50 group-hover:opacity-100">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>
-          </button>
+        // Wrapped in the timeline hover like Status/People, so it shows each
+        // status's due date even when the current one has none.
+        return (
+          <TimelineHover itemId={item.id}>
+            {item.next_due_date ? (
+              <button type="button" onClick={openAssign} className="text-slate-700 hover:text-blue-600 hover:underline">
+                {new Date(item.next_due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(' ', '-')}
+              </button>
+            ) : (
+              <button type="button" onClick={openAssign} title="Set due date"
+                      className="grid h-7 w-7 place-items-center rounded-full text-blue-600 opacity-0 transition hover:bg-blue-50 group-hover:opacity-100">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>
+              </button>
+            )}
+          </TimelineHover>
         );
       case 'template':
         return item.template_name ?? <span className="text-slate-400">—</span>;
@@ -601,10 +645,12 @@ function TitleCell({ projectId, item, onOpen }: { projectId: string; item: ItemS
 
   return (
     <span className="group flex items-center gap-2">
-      <button type="button" onClick={(e) => { stop(e); onOpen(); }} title={item.name}
-              className="max-w-[340px] truncate text-left font-medium text-blue-600 hover:underline">
-        {item.name}
-      </button>
+      <TitleTip text={item.name}>
+        <button type="button" onClick={(e) => { stop(e); onOpen(); }}
+                className="block max-w-[340px] truncate text-left font-medium text-blue-600 hover:underline">
+          {item.name}
+        </button>
+      </TitleTip>
       <button type="button" onClick={(e) => { stop(e); setEditing(true); }} title="Rename"
               className="shrink-0 opacity-0 transition group-hover:opacity-100 text-slate-400 hover:text-slate-600">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>

@@ -8,6 +8,7 @@ import { AllProjects } from './components/AllProjects';
 import { ContentItemsTable } from './components/ContentItemsTable';
 import { CreateItemDialog } from './components/CreateItemDialog';
 import { Sidebar, IMPLEMENTED, type NavKey } from './components/Sidebar';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Heavy pages not shown on first load are code-split into their own chunks —
 // ItemEditor pulls in TipTap (the biggest dependency), so it stays out of the
@@ -199,18 +200,22 @@ function Workspace() {
       />
 
       <div className="min-w-0 flex-1 overflow-y-auto bg-slate-100">
-        {showAll || !projectId ? (
-          <div className="mx-auto max-w-[1400px] px-6 py-6">
-            <AllProjects
-              onOpenProject={selectProject}
-              onOpenItem={(it) => { setProjectId(it.project_id); setShowAll(false); setNav('content'); setItemId(it.id); }}
-            />
-          </div>
-        ) : (
-          <ProjectView projectId={projectId} nav={nav} itemId={itemId}
-                       onOpenItem={(id) => { setNav('content'); setItemId(id); }}
-                       onOpenTemplate={openTemplate} openTemplateId={openTemplateId} onSetTemplate={setOpenTemplateId} />
-        )}
+        {/* A crash below here shows a recoverable panel (and auto-clears when the
+            user navigates) instead of unmounting the whole app to a blank page. */}
+        <ErrorBoundary resetKeys={[showAll, projectId, nav, itemId, openTemplateId]}>
+          {showAll || !projectId ? (
+            <div className="mx-auto max-w-[1400px] px-6 py-6">
+              <AllProjects
+                onOpenProject={selectProject}
+                onOpenItem={(it) => { setProjectId(it.project_id); setShowAll(false); setNav('content'); setItemId(it.id); }}
+              />
+            </div>
+          ) : (
+            <ProjectView projectId={projectId} nav={nav} itemId={itemId}
+                         onOpenItem={(id) => { setNav('content'); setItemId(id); }}
+                         onOpenTemplate={openTemplate} openTemplateId={openTemplateId} onSetTemplate={setOpenTemplateId} />
+          )}
+        </ErrorBoundary>
       </div>
     </div>
   );
@@ -296,9 +301,11 @@ function ProjectView({
                 className="mb-3 text-sm text-blue-600 hover:underline">
           ← Content items
         </button>
-        <Suspense fallback={<LazyFallback />}>
-          <ItemEditor itemId={itemId} projectId={projectId} onOpenItem={onOpenItem} onOpenTemplate={onOpenTemplate} />
-        </Suspense>
+        <ErrorBoundary label="the editor" resetKeys={[itemId]}>
+          <Suspense fallback={<LazyFallback />}>
+            <ItemEditor itemId={itemId} projectId={projectId} onOpenItem={onOpenItem} onOpenTemplate={onOpenTemplate} />
+          </Suspense>
+        </ErrorBoundary>
       </div>
     );
   }

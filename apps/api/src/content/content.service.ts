@@ -37,8 +37,16 @@ export class ContentService {
                   join public.roles ro on ro.id = pr.role_id
                   where a.item_id = ci.id and a.status_id = ci.current_status_id
                 ), '[]'::jsonb) as people,
-                (select min(a.due_at) from public.item_status_assignees a
-                 where a.item_id = ci.id and a.status_id = ci.current_status_id) as next_due_date
+                -- The current status's due date, or if it has none, the next
+                -- upcoming status (by position) that does — matching the reference.
+                (select a.due_at
+                   from public.item_status_assignees a
+                   join public.workflow_statuses s2 on s2.id = a.status_id
+                  where a.item_id = ci.id and a.due_at is not null
+                    and s2.position >= coalesce((select s3.position from public.workflow_statuses s3
+                                                  where s3.id = ci.current_status_id), 0)
+                  order by s2.position asc, a.due_at asc
+                  limit 1) as next_due_date
            from public.content_items ci
            left join public.templates t on t.id = ci.template_id
            left join public.workflow_statuses s on s.id = ci.current_status_id

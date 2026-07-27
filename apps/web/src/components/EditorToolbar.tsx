@@ -138,7 +138,7 @@ const I = {
 };
 
 export function EditorToolbar({
-  editor, docTitle, fullscreen, onToggleFullscreen, onUpload,
+  editor, docTitle, fullscreen, onToggleFullscreen, onUpload, disabled = false,
 }: {
   editor: Editor;
   docTitle?: string;
@@ -146,6 +146,10 @@ export function EditorToolbar({
   onToggleFullscreen?: () => void;
   /** Enables the Insert Image dialog's Upload tab. */
   onUpload?: (file: File) => Promise<{ url: string; fullUrl: string }>;
+  /** Read-only status: keep the toolbar mounted but greyed + non-interactive
+   *  (rather than unmounting it, which churns the DOM next to the portaled
+   *  BubbleMenus and can crash React reconciliation). */
+  disabled?: boolean;
 }) {
   const [, forceRender] = useReducer((n: number) => n + 1, 0);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -377,7 +381,8 @@ export function EditorToolbar({
   const inTable = editor.isActive('table');
 
   return (
-    <div className="border-b border-slate-200 bg-slate-50">
+    <div className={`border-b border-slate-200 bg-slate-50 ${disabled ? 'pointer-events-none select-none opacity-50' : ''}`}
+         aria-disabled={disabled || undefined}>
       {/* Selection bubble — appears over a non-empty text selection (matching the
           reference): bold / italic · link · H2 · H3 · quote · image · table ·
           comment. Not shown on an image/figure/table (those have their own
