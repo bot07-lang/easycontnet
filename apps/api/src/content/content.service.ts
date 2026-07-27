@@ -22,14 +22,19 @@ export class ContentService {
         `select ci.id, ci.item_number, ci.name, ci.updated_at,
                 t.name as template_name,
                 s.name as status_name, s.color as status_color, s.is_terminal,
+                (case when s.id is not null then
+                   (select count(*) from public.workflow_statuses s2
+                     where s2.project_id = ci.project_id and s2.position <= s.position)
+                 end) as status_index,
                 (ci.current_status_id is not null
                  and exists (select 1 from public.item_status_assignees a
                              where a.item_id = ci.id and a.status_id = ci.current_status_id
                                and a.profile_id = $2)) as mine,
                 coalesce((
-                  select jsonb_agg(jsonb_build_object('name', pr.full_name) order by pr.full_name)
+                  select jsonb_agg(jsonb_build_object('name', pr.full_name, 'role', ro.name) order by pr.full_name)
                   from public.item_status_assignees a
                   join public.profiles pr on pr.id = a.profile_id
+                  join public.roles ro on ro.id = pr.role_id
                   where a.item_id = ci.id and a.status_id = ci.current_status_id
                 ), '[]'::jsonb) as people,
                 (select min(a.due_at) from public.item_status_assignees a

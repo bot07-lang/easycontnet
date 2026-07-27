@@ -4,6 +4,10 @@ import { api, type ItemSummary } from '../lib/api';
 import { AssignDialog } from './AssignDialog';
 import { CreateItemDialog } from './CreateItemDialog';
 import { getItemCategories, setItemCategories, getProjectCategories } from '../lib/categories-store';
+import { TimelineHover } from './ItemTimeline';
+import { avatarColor, avatarInitial } from '../lib/avatar';
+import { downloadItemHtml } from '../lib/export-html';
+import { toast } from '../lib/toast';
 
 /** Column definitions. Title + Status are fixed (always shown, first). */
 type ColKey = 'people' | 'due' | 'template' | 'categories' | 'tags' | 'timeInStatus' | 'lastUpdated';
@@ -17,7 +21,18 @@ const COLUMNS: { key: ColKey; label: string; defaultOn: boolean }[] = [
   { key: 'lastUpdated', label: 'Last updated', defaultOn: false },
 ];
 
-type Filter = 'all' | 'assigned' | 'unassigned' | 'mine';
+type Filter = 'all' | 'assigned' | 'unassigned';
+
+/** Advanced filters (funnel menu). Empty arrays / nulls mean "no constraint". */
+type AdvFilters = {
+  people: string[];
+  statuses: string[];
+  templates: string[];
+  categories: string[];
+  dueFrom: string | null;
+  dueTo: string | null;
+};
+const EMPTY_ADV: AdvFilters = { people: [], statuses: [], templates: [], categories: [], dueFrom: null, dueTo: null };
 
 // Title and Status are fixed columns; the rest come from ColKey.
 type SortKey = 'title' | 'status' | ColKey;
@@ -49,8 +64,12 @@ export function ContentItemsTable({
   });
 
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
+  const [tab, setTab] = useState<Filter>('all');
+  const [mine, setMine] = useState(false);
   const [hideCompleted, setHideCompleted] = useState(false);
+  const [adv, setAdv] = useState<AdvFilters>(EMPTY_ADV);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterBtn = useRef<HTMLButtonElement>(null);
   const [manageOpen, setManageOpen] = useState(false);
   const [cols, setCols] = useState<ColKey[]>(COLUMNS.filter((c) => c.defaultOn).map((c) => c.key));
   const [order, setOrder] = useState<ColKey[]>(COLUMNS.map((c) => c.key));
@@ -59,14 +78,39 @@ export function ContentItemsTable({
   const toggleSort = (key: SortKey) =>
     setSort((s) => (!s || s.key !== key ? { key, dir: 'asc' } : s.dir === 'asc' ? { key, dir: 'desc' } : null));
 
+  // Filter options come from the data actually present in the list, so a filter
+  // only ever offers values that exist on some item.
+  const opts = useMemo(() => {
+    const data = items.data ?? [];
+    const statusMap = new Map<string, string>();
+    data.forEach((i) => { if (i.status_name) statusMap.set(i.status_name, i.status_color ?? '#9ca3af'); });
+    // Map each assignee name → role so the people filter can group by role.
+    const roleByName = new Map<string, string>();
+    data.forEach((i) => i.people.forEach((p) => { if (p.role) roleByName.set(p.name, p.role); }));
+    return {
+      people: [...new Set(data.flatMap((i) => i.people.map((p) => p.name)))].sort((a, b) => a.localeCompare(b)),
+      roleByName,
+      statuses: [...statusMap.entries()].map(([name, color]) => ({ name, color })),
+      templates: [...new Set(data.map((i) => i.template_name).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b)),
+      // All categories defined in the project (not just those assigned to items).
+      categories: getProjectCategories(projectId).slice().sort((a, b) => a.localeCompare(b)),
+    };
+  }, [items.data, projectId]);
+
   const shown = useMemo(() => {
     let list = [...(items.data ?? [])];
     const q = search.trim().toLowerCase();
     if (q) list = list.filter((i) => i.name.toLowerCase().includes(q));
-    if (filter === 'assigned') list = list.filter((i) => i.people.length > 0);
-    if (filter === 'unassigned') list = list.filter((i) => i.people.length === 0);
-    if (filter === 'mine') list = list.filter((i) => i.mine);
+    if (tab === 'assigned') list = list.filter((i) => i.people.length > 0);
+    if (tab === 'unassigned') list = list.filter((i) => i.people.length === 0);
+    if (mine) list = list.filter((i) => i.mine);
     if (hideCompleted) list = list.filter((i) => !i.is_terminal);
+    if (adv.people.length) list = list.filter((i) => i.people.some((p) => adv.people.includes(p.name)));
+    if (adv.statuses.length) list = list.filter((i) => i.status_name != null && adv.statuses.includes(i.status_name));
+    if (adv.templates.length) list = list.filter((i) => i.template_name != null && adv.templates.includes(i.template_name));
+    if (adv.categories.length) list = list.filter((i) => getItemCategories(i.id).some((c) => adv.categories.includes(c)));
+    if (adv.dueFrom) list = list.filter((i) => i.next_due_date != null && i.next_due_date.slice(0, 10) >= adv.dueFrom!);
+    if (adv.dueTo) list = list.filter((i) => i.next_due_date != null && i.next_due_date.slice(0, 10) <= adv.dueTo!);
     if (sort) {
       list.sort((a, b) => {
         const av = sortValue(a, sort.key);
@@ -80,15 +124,18 @@ export function ContentItemsTable({
       });
     }
     return list;
-  }, [items.data, search, filter, hideCompleted, sort]);
+  }, [items.data, search, tab, mine, hideCompleted, adv, sort]);
 
   const activeCols = order.filter((k) => cols.includes(k));
+
+  // Applied-filter chips (from the advanced filters only).
+  const chips = buildFilterChips(adv, setAdv);
+  const clearAllFilters = () => { setSearch(''); setTab('all'); setMine(false); setHideCompleted(false); setAdv(EMPTY_ADV); };
 
   const TABS: { key: Filter; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'assigned', label: 'Assigned' },
     { key: 'unassigned', label: 'Not assigned' },
-    { key: 'mine', label: 'My items' },
   ];
 
   return (
@@ -96,7 +143,7 @@ export function ContentItemsTable({
       <h1 className="mb-4 text-2xl font-semibold text-slate-900">Content Items</h1>
 
       {/* Toolbar */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-3 flex flex-wrap items-center gap-3">
         <div className="relative">
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search…"
                  className="w-56 rounded-md border border-slate-300 py-2 pl-3 pr-8 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100" />
@@ -104,20 +151,35 @@ export function ContentItemsTable({
                className="absolute right-2.5 top-2.5 text-slate-400"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
         </div>
 
+        {/* All / Assigned / Not assigned */}
         <div className="flex overflow-hidden rounded-md border border-slate-300 text-sm">
           {TABS.map((t) => (
-            <button key={t.key} type="button" onClick={() => setFilter(t.key)}
-                    className={filter === t.key ? 'bg-blue-50 px-4 py-2 font-medium text-blue-700' : 'px-4 py-2 text-slate-600 hover:bg-slate-50'}>
+            <button key={t.key} type="button" onClick={() => setTab(t.key)}
+                    className={tab === t.key ? 'bg-blue-50 px-4 py-2 font-medium text-blue-700' : 'px-4 py-2 text-slate-600 hover:bg-slate-50'}>
               {t.label}
             </button>
           ))}
         </div>
 
         <label className="flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700">
-          <input type="checkbox" checked={hideCompleted} onChange={(e) => setHideCompleted(e.target.checked)}
-                 className="h-4 w-4 accent-blue-600" />
+          <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} className="h-4 w-4 accent-blue-600" />
+          My items
+        </label>
+        <label className="flex cursor-pointer items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700">
+          <input type="checkbox" checked={hideCompleted} onChange={(e) => setHideCompleted(e.target.checked)} className="h-4 w-4 accent-blue-600" />
           Hide completed
         </label>
+
+        {/* Advanced filter funnel */}
+        <div className="relative">
+          <button ref={filterBtn} type="button" onClick={() => setFilterOpen((v) => !v)} title="Filters"
+                  className={`grid h-9 w-9 place-items-center rounded-md border ${chips.length ? 'border-blue-400 bg-blue-50 text-blue-600' : 'border-slate-300 text-slate-600 hover:bg-slate-50'}`}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" /></svg>
+          </button>
+          {filterOpen && (
+            <FilterMenu opts={opts} adv={adv} onChange={setAdv} onClose={() => setFilterOpen(false)} />
+          )}
+        </div>
 
         <div className="ml-auto flex items-center gap-2">
           <NewItemButton projectId={projectId} onCreated={onOpenItem} />
@@ -127,6 +189,24 @@ export function ContentItemsTable({
           </button>
         </div>
       </div>
+
+      {/* Applied filters */}
+      {chips.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-slate-600">Applied filters:</span>
+          {chips.map((chip) => (
+            <span key={chip.label} className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700">
+              {chip.label}
+              <button type="button" onClick={chip.onRemove} className="text-slate-400 hover:text-red-600">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </button>
+            </span>
+          ))}
+          <button type="button" onClick={() => setAdv(EMPTY_ADV)} className="rounded-md border border-blue-300 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50">
+            Clear all
+          </button>
+        </div>
+      )}
 
       {/* Table */}
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-slate-200 bg-white">
@@ -146,7 +226,14 @@ export function ContentItemsTable({
               <tr><td colSpan={activeCols.length + 3} className="px-4 py-8 text-center text-slate-400">Loading…</td></tr>
             )}
             {shown.length === 0 && !items.isLoading && (
-              <tr><td colSpan={activeCols.length + 3} className="px-4 py-8 text-center text-slate-400">No items match.</td></tr>
+              <tr>
+                <td colSpan={activeCols.length + 3} className="px-4 py-16 text-center">
+                  <p className="text-[17px] text-slate-500">No content items found that match your criteria</p>
+                  <button type="button" onClick={clearAllFilters} className="mt-3 text-[15px] font-semibold text-blue-600 hover:underline">
+                    Clear all filters
+                  </button>
+                </td>
+              </tr>
             )}
             {shown.map((it) => (
               <Row key={it.id} projectId={projectId} item={it} cols={activeCols} onOpen={() => onOpenItem(it.id)} />
@@ -164,6 +251,149 @@ export function ContentItemsTable({
       )}
     </div>
   );
+}
+
+type Sub = 'people' | 'status' | 'due' | 'template' | 'category';
+
+/** The funnel dropdown: five submenus that filter the list. Options are passed
+ *  in from the data actually present, and flyouts open to the left (the funnel
+ *  sits on the right of the toolbar). */
+function FilterMenu({
+  opts, adv, onChange, onClose,
+}: {
+  opts: { people: string[]; roleByName: Map<string, string>; statuses: { name: string; color: string }[]; templates: string[]; categories: string[] };
+  adv: AdvFilters;
+  onChange: React.Dispatch<React.SetStateAction<AdvFilters>>;
+  onClose: () => void;
+}) {
+  const [sub, setSub] = useState<Sub | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [onClose]);
+
+  const toggle = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+  const rows: { key: Sub; label: string }[] = [
+    { key: 'people', label: 'Assigned people' },
+    { key: 'status', label: 'Workflow status' },
+    { key: 'due', label: 'Due date range' },
+    { key: 'template', label: 'Template' },
+    { key: 'category', label: 'Categories' },
+  ];
+
+  return (
+    <div ref={ref} className="absolute right-0 top-full z-30 mt-1 w-60 rounded-md border border-slate-200 bg-white py-1 shadow-xl">
+      {rows.map((r) => (
+        <div key={r.key} className="relative" onMouseEnter={() => setSub(r.key)}>
+          <button type="button" className={`flex w-full items-center justify-between px-4 py-2.5 text-left text-[15px] ${sub === r.key ? 'bg-slate-100' : 'hover:bg-slate-100'} text-slate-700`}>
+            {r.label} <span className="text-slate-400">›</span>
+          </button>
+          {sub === r.key && (
+            <div className="absolute right-full top-0 z-40 mr-1 w-64 rounded-md border border-slate-200 bg-white p-2 shadow-xl">
+              {r.key === 'people' && <CheckList options={opts.people} groupOf={(n) => opts.roleByName.get(n)} selected={adv.people} onToggle={(v) => onChange((p) => ({ ...p, people: toggle(p.people, v) }))} />}
+              {r.key === 'status' && <CheckList options={opts.statuses.map((s) => s.name)} colorOf={(n) => opts.statuses.find((s) => s.name === n)?.color} selected={adv.statuses} onToggle={(v) => onChange((p) => ({ ...p, statuses: toggle(p.statuses, v) }))} />}
+              {r.key === 'template' && <CheckList options={opts.templates} selected={adv.templates} onToggle={(v) => onChange((p) => ({ ...p, templates: toggle(p.templates, v) }))} />}
+              {r.key === 'category' && <CheckList options={opts.categories} selected={adv.categories} onToggle={(v) => onChange((p) => ({ ...p, categories: toggle(p.categories, v) }))} />}
+              {r.key === 'due' && <DateRange from={adv.dueFrom} to={adv.dueTo} onChange={(from, to) => onChange((p) => ({ ...p, dueFrom: from, dueTo: to }))} />}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Searchable checkbox list used by the filter submenus. */
+function CheckList({
+  options, selected, onToggle, colorOf, groupOf,
+}: {
+  options: string[];
+  selected: string[];
+  onToggle: (v: string) => void;
+  colorOf?: (v: string) => string | undefined;
+  groupOf?: (v: string) => string | undefined;
+}) {
+  const [q, setQ] = useState('');
+  const shown = options.filter((o) => !q.trim() || o.toLowerCase().includes(q.trim().toLowerCase()));
+  const row = (o: string) => (
+    <label key={o} className="flex cursor-pointer items-center gap-2.5 rounded px-2 py-1.5 text-[14px] text-slate-800 hover:bg-slate-50">
+      <input type="checkbox" checked={selected.includes(o)} onChange={() => onToggle(o)} className="h-4 w-4 accent-blue-600" />
+      {colorOf && <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colorOf(o) ?? '#9ca3af' }} />}
+      <span className="truncate">{o}</span>
+    </label>
+  );
+  // When groupOf is given, bucket the shown options under role headers.
+  const groups: { role: string; items: string[] }[] = [];
+  if (groupOf) {
+    for (const o of shown) {
+      const g = groupOf(o) ?? '—';
+      let bucket = groups.find((x) => x.role === g);
+      if (!bucket) { bucket = { role: g, items: [] }; groups.push(bucket); }
+      bucket.items.push(o);
+    }
+  }
+  return (
+    <div>
+      <div className="relative mb-1">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…"
+               className="h-9 w-full rounded-md border border-slate-300 pl-2.5 pr-8 text-[14px] focus:border-blue-500 focus:outline-none" />
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="absolute right-2.5 top-2.5 text-slate-400"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+      </div>
+      <div className="max-h-56 overflow-y-auto">
+        {shown.length === 0 ? (
+          <p className="px-2 py-3 text-center text-[13px] text-slate-400">No matches</p>
+        ) : groupOf ? (
+          groups.map((g) => (
+            <div key={g.role} className="pb-1">
+              <p className="px-2 pb-0.5 pt-2 text-[12px] font-medium text-slate-400">{g.role}</p>
+              {g.items.map(row)}
+            </div>
+          ))
+        ) : shown.map(row)}
+      </div>
+    </div>
+  );
+}
+
+/** Due-date range: a From/To pair. */
+function DateRange({ from, to, onChange }: { from: string | null; to: string | null; onChange: (from: string | null, to: string | null) => void }) {
+  return (
+    <div className="w-60 space-y-3 p-1">
+      <label className="block">
+        <span className="mb-1 block text-[13px] text-slate-500">From</span>
+        <input type="date" value={from ?? ''} onChange={(e) => onChange(e.target.value || null, to)}
+               className="w-full rounded-md border border-slate-300 px-2.5 py-2 text-[14px] focus:border-blue-500 focus:outline-none" />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-[13px] text-slate-500">To</span>
+        <input type="date" value={to ?? ''} onChange={(e) => onChange(from, e.target.value || null)}
+               className="w-full rounded-md border border-slate-300 px-2.5 py-2 text-[14px] focus:border-blue-500 focus:outline-none" />
+      </label>
+      {(from || to) && (
+        <button type="button" onClick={() => onChange(null, null)} className="text-[13px] font-medium text-blue-600 hover:underline">Clear dates</button>
+      )}
+    </div>
+  );
+}
+
+/** Build the applied-filter chips (label + a remover) from the advanced filters. */
+function buildFilterChips(adv: AdvFilters, setAdv: (fn: (p: AdvFilters) => AdvFilters) => void): { label: string; onRemove: () => void }[] {
+  const chips: { label: string; onRemove: () => void }[] = [];
+  const listChip = (key: 'people' | 'statuses' | 'templates' | 'categories', title: string) => {
+    if (adv[key].length) chips.push({ label: `${title}: ${adv[key].join(', ')}`, onRemove: () => setAdv((p) => ({ ...p, [key]: [] })) });
+  };
+  listChip('people', 'People');
+  listChip('statuses', 'Status');
+  listChip('templates', 'Template');
+  listChip('categories', 'Categories');
+  if (adv.dueFrom || adv.dueTo) {
+    const fmt = (d: string) => new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    const label = adv.dueFrom && adv.dueTo ? `From ${fmt(adv.dueFrom)} to ${fmt(adv.dueTo)}` : adv.dueFrom ? `From ${fmt(adv.dueFrom)}` : `Until ${fmt(adv.dueTo!)}`;
+    chips.push({ label: `Due date: ${label}`, onRemove: () => setAdv((p) => ({ ...p, dueFrom: null, dueTo: null })) });
+  }
+  return chips;
 }
 
 function Row({
@@ -185,21 +415,23 @@ function Row({
         // Avatars for who's assigned, plus a dashed add-person button that
         // appears on row hover (always shown when nobody is assigned).
         return (
-          <button type="button" onClick={openAssign} title={item.people.length ? 'Edit assignees' : 'Assign people'}
-                  className="flex items-center gap-1.5">
-            {item.people.length > 0 && (
-              <span className="flex -space-x-2">
-                {item.people.slice(0, 3).map((p) => (
-                  <span key={p.name} title={p.name}
-                        className="grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[11px] font-semibold text-white"
-                        style={{ background: avatarColor(p.name) }}>{p.name.trim().charAt(0).toUpperCase()}</span>
-                ))}
+          <TimelineHover itemId={item.id}>
+            <button type="button" onClick={openAssign} title={item.people.length ? 'Edit assignees' : 'Assign people'}
+                    className="flex items-center gap-1.5">
+              {item.people.length > 0 && (
+                <span className="flex -space-x-2">
+                  {item.people.slice(0, 3).map((p) => (
+                    <span key={p.name} title={p.name}
+                          className="grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[11px] font-semibold text-white"
+                          style={{ background: avatarColor(p.name) }}>{avatarInitial(p.name)}</span>
+                  ))}
+                </span>
+              )}
+              <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border border-dashed border-slate-300 text-slate-500 transition hover:border-slate-500 hover:text-slate-700 ${item.people.length ? 'opacity-0 group-hover:opacity-100' : ''}`}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.2" /><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6" /></svg>
               </span>
-            )}
-            <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-full border border-dashed border-slate-300 text-slate-500 transition hover:border-slate-500 hover:text-slate-700 ${item.people.length ? 'opacity-0 group-hover:opacity-100' : ''}`}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.2" /><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6" /></svg>
-            </span>
-          </button>
+            </button>
+          </TimelineHover>
         );
       case 'due':
         // The date if set (click to edit); otherwise a + on hover to set one.
@@ -248,10 +480,17 @@ function Row({
       </td>
       <td className="px-4 py-3">
         {item.status_name ? (
-          <span className="inline-flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.status_color ?? '#9ca3af' }} />
-            {item.status_name}
-          </span>
+          <TimelineHover itemId={item.id}>
+            <button type="button" onClick={openAssign} title="Assigned people and due dates"
+                    className="inline-flex items-center gap-2 text-left hover:text-blue-600">
+              {/* Numbered stage circle in the status colour. */}
+              <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full text-[11px] font-semibold text-white"
+                    style={{ background: item.status_color ?? '#9ca3af' }}>
+                {item.status_index ?? ''}
+              </span>
+              <span>{item.status_name}</span>
+            </button>
+          </TimelineHover>
         ) : <span className="text-slate-400">—</span>}
       </td>
       {cols.map((k) => <td key={k} className="px-4 py-3 text-slate-700">{cell(k)}</td>)}
@@ -361,12 +600,13 @@ function TitleCell({ projectId, item, onOpen }: { projectId: string; item: ItemS
   }
 
   return (
-    <span className="group inline-flex items-center gap-2">
-      <button type="button" onClick={(e) => { stop(e); onOpen(); }} className="font-medium text-blue-600 hover:underline">
+    <span className="group flex items-center gap-2">
+      <button type="button" onClick={(e) => { stop(e); onOpen(); }} title={item.name}
+              className="max-w-[340px] truncate text-left font-medium text-blue-600 hover:underline">
         {item.name}
       </button>
       <button type="button" onClick={(e) => { stop(e); setEditing(true); }} title="Rename"
-              className="opacity-0 transition group-hover:opacity-100 text-slate-400 hover:text-slate-600">
+              className="shrink-0 opacity-0 transition group-hover:opacity-100 text-slate-400 hover:text-slate-600">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
       </button>
     </span>
@@ -390,7 +630,23 @@ function RowActions({
   const [confirm, setConfirm] = useState(false);
   const [changeStatus, setChangeStatus] = useState(false);
   const [assign, setAssign] = useState(false);
+  const [catsOpen, setCatsOpen] = useState(false);
+  const [cats, setCats] = useState<string[]>(() => getItemCategories(item.id));
   const ref = useRef<HTMLDivElement>(null);
+
+  // Export to HTML from the row: fetch the full item + fresh asset URLs, then
+  // build + download (reuses the same builder as the editor's export).
+  const exportItem = async () => {
+    setOpen(false);
+    try {
+      const full = await api.getItem(item.id);
+      const fileUrls = new Map<string, string>();
+      try { (await api.listFiles(projectId)).forEach((f) => { if (f.fullUrl) fileUrls.set(f.id, f.fullUrl); }); } catch { /* export without live URLs */ }
+      downloadItemHtml(full, fileUrls);
+    } catch {
+      toast('Could not export the item.');
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -425,14 +681,14 @@ function RowActions({
       {open && (
         <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl">
           <MenuItem icon="assign" label="Assign people" onClick={() => { setOpen(false); setAssign(true); }} />
-          <MenuItem icon="calendar" label="Manage due dates" disabled />
+          <MenuItem icon="calendar" label="Manage due dates" onClick={() => { setOpen(false); setAssign(true); }} />
           <MenuItem icon="status" label="Change status" onClick={() => { setOpen(false); setChangeStatus(true); }} />
           <MenuItem icon="template" label="Change template" disabled />
-          <MenuItem icon="folder" label="Change category" disabled />
+          <MenuItem icon="folder" label="Change category" onClick={() => { setOpen(false); setCatsOpen(true); }} />
           <MenuItem icon="duplicate" label="Duplicate item" disabled />
           <MenuItem icon="brief" label="Convert to Brief" disabled />
           <MenuItem icon="cloud" label="Export to DOCX" disabled />
-          <MenuItem icon="cloud" label="Export to HTML" disabled />
+          <MenuItem icon="cloud" label="Export to HTML" onClick={exportItem} />
           <div className="my-1.5 border-t border-slate-100" />
           <MenuItem icon="trash" label="Delete" danger onClick={() => setConfirm(true)} />
         </div>
@@ -452,6 +708,14 @@ function RowActions({
       )}
       {assign && (
         <AssignDialog itemId={item.id} itemName={item.name} onClose={() => setAssign(false)} />
+      )}
+      {catsOpen && (
+        <ChangeCategoriesDialog
+          projectId={projectId}
+          selected={cats}
+          onClose={() => setCatsOpen(false)}
+          onSaved={(next) => { setItemCategories(item.id, next); setCats(next); setCatsOpen(false); }}
+        />
       )}
     </div>
   );
@@ -789,8 +1053,3 @@ function SortIcon({ active, dir }: { active: boolean; dir?: 'asc' | 'desc' }) {
   );
 }
 
-function avatarColor(name: string) {
-  const palette = ['#e11d48', '#7c3aed', '#0891b2', '#ea580c', '#059669', '#4f46e5', '#db2777'];
-  let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return palette[h % palette.length]!;
-}

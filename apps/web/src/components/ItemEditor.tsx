@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ApiItem, type ItemVersion, type StoredFile } from '../lib/api';
 import { CompareDialog, DIFF_CSS } from './CompareDialog';
 import { fieldValueToHtml, isDiffableField } from '../lib/diff-fields';
+import { buildItemHtml, downloadText, exportDateLabel } from '../lib/export-html';
 import * as saveManager from '../lib/save-manager';
 import type { ContentField } from '../mock/article';
 import { Field } from './Field';
@@ -29,137 +30,6 @@ function patchFieldValue(item: ApiItem, fieldId: string, value: unknown): ApiIte
   };
 }
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const escAttr = (s: string) => esc(s).replace(/"/g, '&quot;');
-
-/** Human field-type tag shown before each field name, matching the reference. */
-function fieldTypeTag(type: string, isPlainText: boolean): string {
-  switch (type) {
-    case 'single_line_text': return '[text field]';
-    case 'paragraph_text': return isPlainText ? '[text area – plain text]' : '[text area - rich text]';
-    case 'file_image_upload': return '[asset]';
-    case 'featured_image': return '[asset]';
-    case 'checkboxes': return '[checkboxes]';
-    case 'radio_buttons': return '[radio buttons]';
-    case 'dropdown_select': return '[dropdown]';
-    case 'date': return '[date]';
-    case 'heading': return '[heading]';
-    case 'guidelines': return '[guidelines]';
-    default: return `[${type}]`;
-  }
-}
-
-/** Render one field to an `.ec-field` block: [type] label + guideline + value. */
-function renderExportField(
-  f: { id: string; type: string; label: string; isPlainText: boolean; guidelines?: string; choices: string[] },
-  value: unknown,
-  fileUrls: Map<string, string>,
-): string {
-  const tag = fieldTypeTag(f.type, f.isPlainText);
-  const guideline = f.guidelines ? `<p class="field-guideline">${esc(f.guidelines)}</p>` : '';
-  const name = (label: string) => `<p class="field-name">${tag} ${esc(label)}</p>`;
-
-  // Section fields carry their text in the label / value, not a widget.
-  if (f.type === 'heading') return `<div class="ec-field">${name('')}<p>${esc(f.label)}</p></div>`;
-  if (f.type === 'guidelines') return `<div class="ec-field">${name('')}<p>${esc(String(value ?? f.label ?? ''))}</p></div>`;
-
-  let body: string;
-  if (f.type === 'checkboxes' || f.type === 'radio_buttons') {
-    const sel = Array.isArray(value) ? (value as string[]) : [];
-    const inputType = f.type === 'radio_buttons' ? 'radio' : 'checkbox';
-    body = (f.choices ?? [])
-      .map((c, i) => {
-        const cid = `${f.id}-${i}`;
-        const checked = sel.includes(c) ? ' checked' : '';
-        return `<input type="${inputType}" id="${escAttr(cid)}" name="${escAttr(f.id)}"${checked} disabled><label for="${escAttr(cid)}">${esc(c)}</label><br>`;
-      })
-      .join('');
-  } else if (f.type === 'file_image_upload') {
-    const files = Array.isArray(value) ? (value as { id: string; name: string; mime: string | null }[]) : [];
-    if (!files.length) {
-      body = '<p class="empty">—</p>';
-    } else {
-      const rows = files
-        .map((sf) => {
-          const url = fileUrls.get(sf.id);
-          const link = url ? `<a href="${escAttr(url)}">Link</a>` : '—';
-          const preview = url && (sf.mime ?? '').startsWith('image/') ? `<img src="${escAttr(url)}">` : '';
-          return `<tr><td>${esc(sf.name)}</td><td>${link}</td><td>${preview}</td></tr>`;
-        })
-        .join('');
-      body = `<table><tbody><tr><th>File name</th><th>File URL</th><th>Preview</th></tr>${rows}</tbody></table>`;
-    }
-  } else {
-    body = fieldValueToHtml({ id: f.id, type: f.type, label: f.label, isPlainText: f.isPlainText, choices: f.choices }, value) || '<p class="empty">—</p>';
-  }
-  return `<div class="ec-field">${name(f.label)}${guideline}${body}</div>`;
-}
-
-const EXPORT_STYLE = `
-body { background:#eee; min-height:100vh; box-sizing:border-box; font-family:"Helvetica Neue",Helvetica,Arial,sans-serif; font-weight:300; max-width:60rem; margin:0 auto; }
-.item-details { padding:1rem; }
-.main-content { display:flex; flex-wrap:wrap; }
-.main-content label { order:1; display:block; padding:1rem 2rem; margin:0 0.2rem 0.2rem 0; cursor:pointer; background:#90CAF9; font-weight:bold; transition:background ease 0.2s; }
-.main-content .tab { order:99; flex-grow:1; width:100%; display:none; padding:1rem; background:#fff; }
-.main-content input[type="radio"] { display:none; }
-.main-content input[type="radio"]:checked + label { background:#fff; }
-.main-content input[type="radio"]:checked + label + .tab { display:block; }
-.ec-field { border:2px solid; padding:8px; margin:8px; }
-.ec-field img { max-width:100%; height:auto; }
-.ec-field input, .ec-field label { all: revert !important; }
-.field-name { text-decoration:underline; font-weight:bold; }
-.field-guideline { color:#878787; font-style:italic; }
-.empty { color:#878787; font-style:italic; }
-table { border-collapse:collapse; width:100%; }
-td, th { border:1px solid #ddd; text-align:left; padding:8px; }
-tr:nth-child(even) { background:#ddd; }
-@media (max-width:45em) { .main-content .tab, .main-content label { order:initial; } .main-content label { width:100%; margin-right:0; margin-top:0.2rem; } }
-`;
-
-/** Assemble the whole item into a standalone HTML document that mirrors the
- *  reference export: a details header, a tabbed layout, and every field wrapped
- *  in an `.ec-field` block with its [type] tag, guideline and value. fileUrls
- *  supplies live signed URLs for the asset table (resolved at export time). */
-function buildItemHtml(
-  item: ApiItem,
-  values: Record<string, unknown>,
-  fileUrls: Map<string, string>,
-  exportDate: string,
-): string {
-  const tabs = item.tabs
-    .map((t, ti) => {
-      const fields = t.fields.map((f) => renderExportField(f, values[f.id], fileUrls)).join('');
-      const id = `ec-tab-${ti}`;
-      return `<input type="radio" id="${id}" name="ec-tabs"${ti === 0 ? ' checked' : ''}><label for="${id}">${esc(t.name)}</label><div class="tab">${fields}</div>`;
-    })
-    .join('');
-  return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"/>
-<meta name="generator" content="Content Workflow"/>
-<title>${esc(item.name)}</title>
-<style>${EXPORT_STYLE}</style></head>
-<body>
-<div class="item-details">
-  <p><span style="font-weight:bold;">Brief Title: </span>${esc(item.name)}</p>
-  <p><span style="font-weight:bold;">Status: </span>${esc(item.status?.name ?? '')}</p>
-  <p><span style="font-weight:bold;">Export Date: </span>${esc(exportDate)}</p>
-</div>
-<div class="main-content">${tabs}</div>
-</body></html>`;
-}
-
-/** Trigger a client-side file download of a text blob. */
-function downloadText(filename: string, text: string, mime: string) {
-  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
 
 /**
  * Loads a real content item from the API, renders its fields, and autosaves
@@ -271,8 +141,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
         /* fall back to exporting without live URLs */
       }
     }
-    const exportDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    downloadText(`${item.name || 'content'}.html`, buildItemHtml(item, values, fileUrls, exportDate), 'text/html');
+    downloadText(`${item.name || 'content'}.html`, buildItemHtml(item, values, fileUrls, exportDateLabel()), 'text/html');
   };
 
   // Version preview (read-only) + the restore confirmation live here so both the

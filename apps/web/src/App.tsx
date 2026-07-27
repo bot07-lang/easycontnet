@@ -193,11 +193,9 @@ function Workspace() {
       <Sidebar
         selectedProjectId={projectId}
         activeNav={showAll ? null : nav}
-        itemId={itemId}
         onAllProjects={() => { setShowAll(true); setItemId(null); }}
         onSelectProject={switchProject}
         onNavigate={(key) => { setShowAll(false); setNav(key); setItemId(null); }}
-        onOpenItem={(id) => { setShowAll(false); setNav('content'); setItemId(id); }}
       />
 
       <div className="min-w-0 flex-1 overflow-y-auto bg-slate-100">

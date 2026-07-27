@@ -40,9 +40,11 @@ export interface ItemSummary {
   template_name: string | null;
   status_name: string | null;
   status_color: string | null;
+  /** 1-based stage number of the current status in the workflow ladder. */
+  status_index: number | null;
   is_terminal: boolean;
   mine: boolean;
-  people: { name: string }[];
+  people: { name: string; role?: string | null }[];
   next_due_date: string | null;
 }
 

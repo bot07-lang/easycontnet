@@ -466,8 +466,7 @@ export function Field({
             readOnly={readOnly}
             onChange={(e) => set(e.target.value)}
             rows={3}
-            className="w-full resize-y border-0 px-5 py-4 text-[15px] text-slate-800
-                       focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 read-only:bg-slate-50"
+            className="w-full resize-y border-0 px-5 py-4 text-[15px] text-slate-800 focus:outline-none read-only:bg-slate-50"
           />
         </FieldShell>
       );
@@ -500,8 +499,7 @@ export function Field({
         value={String(field.value ?? '')}
         readOnly={readOnly}
         onChange={(e) => set(e.target.value)}
-        className="w-full border-0 px-5 py-4 text-[17px] text-slate-800 focus:outline-none
-                   focus:ring-2 focus:ring-inset focus:ring-blue-500 read-only:bg-slate-50"
+        className="w-full border-0 px-5 py-4 text-[17px] text-slate-800 focus:outline-none read-only:bg-slate-50"
       />
     </FieldShell>
   );

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ApiItem, type AssignmentStatus } from '../lib/api';
 import { getItemCategories, setItemCategories, getProjectCategories } from '../lib/categories-store';
 import { AssignDialog } from './AssignDialog';
+import { avatarColor, avatarInitial } from '../lib/avatar';
 
 /**
  * The CONTROLS tab of the item editor's right rail — ITEM DETAILS + WORKFLOW,
@@ -401,18 +402,6 @@ function Chev({ open, blue }: { open: boolean; blue?: boolean }) {
 }
 
 /** Initials for an avatar chip from a person's name. */
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1]![0] : '')).toUpperCase();
-}
-
-/** Stable avatar colour from a name, so the same person is always the same hue. */
-function stringToColor(s: string): string {
-  const palette = ['#e11d48', '#7c3aed', '#0891b2', '#ea580c', '#059669', '#4f46e5'];
-  let h = 0;
-  for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return palette[h % palette.length]!;
-}
 
 function StatusRow({ status, isCurrent, isComplete, isLast, busy, onSelect }: {
   status: AssignmentStatus;
@@ -433,11 +422,12 @@ function StatusRow({ status, isCurrent, isComplete, isLast, busy, onSelect }: {
       <span
         className="absolute left-0 top-0.5 grid h-[19px] w-[19px] place-items-center rounded-full"
         style={
-          // Passed → filled with a tick. Current → bold hollow ring. Not-yet-reached
-          // (incl. a read-only Completed) → thin hollow ring, never filled.
+          // Passed → filled with a tick. Otherwise (current or not-yet-reached) a
+          // hollow ring of consistent thickness; current is distinguished by its
+          // bold label, not a thicker ring.
           isComplete
             ? { background: status.color }
-            : { border: `${isCurrent ? 3 : 2}px solid ${status.color}`, background: 'white' }
+            : { border: `2.5px solid ${status.color}`, background: 'white' }
         }
       >
         {isComplete && (
@@ -483,9 +473,9 @@ function StatusRow({ status, isCurrent, isComplete, isLast, busy, onSelect }: {
             <li key={a.id} className="flex items-center gap-2">
               <span
                 className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-full text-[10px] font-semibold text-white"
-                style={{ background: stringToColor(a.name) }}
+                style={{ background: avatarColor(a.name) }}
               >
-                {initials(a.name)}
+                {avatarInitial(a.name)}
               </span>
               <span className={`truncate text-[13px] ${isCurrent ? 'text-slate-700' : 'text-slate-400'}`}>{a.name}</span>
             </li>

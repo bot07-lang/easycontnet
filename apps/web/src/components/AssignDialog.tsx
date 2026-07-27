@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type AssignmentInfo, type AssignmentStatus } from '../lib/api';
 import { toast } from '../lib/toast';
+import { avatarColor, avatarInitial } from '../lib/avatar';
 
 type Member = AssignmentInfo['members'][number];
 type RowState = { assignees: Set<string>; dueAt: string | null };
@@ -22,7 +24,13 @@ export function AssignDialog({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const info = useQuery({ queryKey: ['assignment', itemId], queryFn: () => api.getAssignmentInfo(itemId) });
+  // Always refetch on open so newly-added members or reviewing-role changes show
+  // immediately (a stale cache must never hide an assignable person).
+  const info = useQuery({
+    queryKey: ['assignment', itemId],
+    queryFn: () => api.getAssignmentInfo(itemId),
+    refetchOnMount: 'always',
+  });
 
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [openPicker, setOpenPicker] = useState<string | null>(null);
@@ -124,7 +132,7 @@ export function AssignDialog({
                         {/* Status */}
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-2.5">
-                            <StatusMarker color={s.color} isCurrent={isCurrent} isComplete={isComplete} />
+                            <StatusMarker color={s.color} isComplete={isComplete} />
                             <span className={isCurrent ? 'font-semibold text-slate-900' : 'text-slate-700'}>{s.name}</span>
                           </div>
                         </td>
@@ -172,10 +180,10 @@ export function AssignDialog({
   );
 }
 
-function StatusMarker({ color, isCurrent, isComplete }: { color: string; isCurrent: boolean; isComplete: boolean }) {
+function StatusMarker({ color, isComplete }: { color: string; isComplete: boolean }) {
   return (
     <span className="grid h-[19px] w-[19px] shrink-0 place-items-center rounded-full"
-          style={isComplete ? { background: color } : { border: `${isCurrent ? 3 : 2}px solid ${color}`, background: 'white' }}>
+          style={isComplete ? { background: color } : { border: `2.5px solid ${color}`, background: 'white' }}>
       {isComplete && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4"><path d="M20 6 9 17l-5-5" /></svg>}
     </span>
   );
@@ -194,13 +202,14 @@ function ResponsibleCell({
 }) {
   const chosen = [...selected].map((id) => memberById.get(id)).filter(Boolean) as Member[];
   const stop = (e: React.MouseEvent) => e.stopPropagation();
+  const fieldRef = useRef<HTMLDivElement>(null);
 
   // One input-like field: chips inline, placeholder when empty; clicking anywhere
   // (except a chip's ✕) opens the picker to add more. Stop mousedown too, or the
   // modal's "close picker on mousedown" unmounts an option before its click fires.
   return (
     <div className="relative" onClick={stop} onMouseDown={stop}>
-      <div role="button" tabIndex={0} onClick={onOpenPicker}
+      <div ref={fieldRef} role="button" tabIndex={0} onClick={onOpenPicker}
            className="flex min-h-[46px] w-full cursor-pointer flex-wrap items-center gap-2 rounded-md border border-slate-300 px-2.5 py-2 hover:bg-slate-50">
         {chosen.map((m) => (
           <span key={m.id} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 py-0.5 pl-0.5 pr-2 text-[14px] text-slate-700">
@@ -218,15 +227,16 @@ function ResponsibleCell({
       </div>
 
       {pickerOpen && (
-        <PeoplePicker status={status} members={members} selected={selected} onToggle={onToggle} />
+        <PeoplePicker anchor={fieldRef.current} status={status} members={members} selected={selected} onToggle={onToggle} />
       )}
     </div>
   );
 }
 
 function PeoplePicker({
-  status, members, selected, onToggle,
+  anchor, status, members, selected, onToggle,
 }: {
+  anchor: HTMLElement | null;
   status: AssignmentStatus;
   members: Member[];
   selected: Set<string>;
@@ -249,8 +259,16 @@ function PeoplePicker({
     return out;
   }, [members, status.reviewing_role_ids, q]);
 
-  return (
-    <div className="absolute left-0 top-full z-30 mt-1 max-h-[320px] w-[360px] max-w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-xl">
+  // Rendered in a portal at a fixed position under the field — the modal body
+  // has overflow-y scrolling, which would clip an absolutely-positioned dropdown
+  // for lower rows (hiding groups below the fold). Its own max-height + scroll
+  // handles long member lists.
+  if (!anchor) return null;
+  const r = anchor.getBoundingClientRect();
+  return createPortal(
+    <div style={{ position: 'fixed', left: r.left, top: r.bottom + 4, width: r.width, zIndex: 60 }}
+         onMouseDown={(e) => e.stopPropagation()}
+         className="max-h-[340px] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-xl">
       <div className="sticky top-0 border-b border-slate-100 bg-white p-2">
         <div className="relative">
           <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name"
@@ -284,7 +302,8 @@ function PeoplePicker({
           </div>
         ))
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -321,18 +340,8 @@ function DueDateCell({ value, onChange }: { value: string | null; onChange: (d: 
 function Avatar({ name, size }: { name: string; size: number }) {
   return (
     <span className="grid shrink-0 place-items-center rounded-full font-semibold text-white"
-          style={{ width: size, height: size, background: colorFor(name), fontSize: size * 0.4 }}>
-      {initials(name)}
+          style={{ width: size, height: size, background: avatarColor(name), fontSize: size * 0.4 }}>
+      {avatarInitial(name)}
     </span>
   );
-}
-
-function initials(name: string): string {
-  return (name.trim()[0] ?? '').toUpperCase();
-}
-function colorFor(s: string): string {
-  const palette = ['#e11d48', '#7c3aed', '#0891b2', '#ea580c', '#059669', '#4f46e5', '#db2777', '#0ea5e9'];
-  let h = 0;
-  for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return palette[h % palette.length]!;
 }
