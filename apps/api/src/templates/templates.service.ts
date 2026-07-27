@@ -483,7 +483,7 @@ export class TemplatesService {
 
   /**
    * Provision a new template's two system tabs and their system fields, matching
-   * the reference: Main Content (Title, Main content, Files) always visible, and
+   * the reference: Main Content (Title, Content, Files) always visible, and
    * CMS Fields (Featured image, Excerpt, Tags, Slug, Meta title, Meta
    * description) hidden by default.
    */
@@ -511,7 +511,7 @@ export class TemplatesService {
 
     const main = await addTab('Main Content', 1024, false);
     await addField(main, 'single_line_text', 'Title', 1024, { units: 'characters' });
-    await addField(main, 'paragraph_text', 'Main content', 2048, { units: 'words' });
+    await addField(main, 'paragraph_text', 'Content', 2048, { units: 'words' });
     await addField(main, 'file_image_upload', 'Files', 3072);
 
     const cms = await addTab('CMS Fields', 2048, true);
