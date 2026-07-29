@@ -198,9 +198,29 @@ const MAX_INDENT = 8;
  */
 export const Indent = Extension.create({
   name: 'indent',
+  // Run our Enter handler before the default split so a new line can drop its
+  // inherited indent.
+  priority: 1000,
 
   addOptions() {
     return { types: ['paragraph', 'heading'], minLevel: 0, maxLevel: MAX_INDENT };
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      // A block's `indent` is a node attribute, so splitting it (Enter) copies
+      // it onto the new paragraph — leaving the next line indented. Reset it so
+      // a fresh line starts at the far left, then fall through for every other
+      // case (no indent, lists, code blocks, or a non-collapsed selection).
+      Enter: () => {
+        const editor = this.editor;
+        if (!editor.state.selection.empty) return false;
+        if (editor.isActive('listItem') || editor.isActive('codeBlock')) return false;
+        const indent = Number(editor.getAttributes('paragraph').indent) || 0;
+        if (indent <= 0) return false;
+        return editor.chain().splitBlock().updateAttributes('paragraph', { indent: 0 }).run();
+      },
+    };
   },
 
   addGlobalAttributes() {

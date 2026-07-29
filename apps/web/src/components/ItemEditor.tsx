@@ -523,6 +523,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
                   projectId={projectId}
                   onAttachFile={attachFile}
                   highlightKeywords={f.id === mainFieldId ? highlightKeywords : undefined}
+                  scrollable={f.id === mainFieldId}
                   readOnly={readOnly || !!lockedBy}
                 />
                 {lockedBy && <FieldLock name={lockedBy} />}

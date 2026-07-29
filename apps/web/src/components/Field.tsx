@@ -294,9 +294,11 @@ function tooltipFor(f: StoredFile, lib?: LibraryFile): string {
 }
 
 export function Field({
-  field, onChange, activeFieldId, onActivate, docTitle, projectId, onAttachFile, highlightKeywords, readOnly = false,
+  field, onChange, activeFieldId, onActivate, docTitle, projectId, onAttachFile, highlightKeywords, readOnly = false, scrollable = false,
 }: {
   field: ContentField;
+  /** Give this field's rich editor a fixed height with its own scrollbar. */
+  scrollable?: boolean;
   onChange: (id: string, value: unknown) => void;
   activeFieldId: string | null;
   onActivate: (id: string) => void;
@@ -506,6 +508,7 @@ export function Field({
           highlightKeywords={highlightKeywords}
           editable={!readOnly}
           fieldId={field.id}
+          scrollable={scrollable}
         />
       </FieldShell>
     );

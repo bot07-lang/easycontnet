@@ -111,6 +111,7 @@ export function RichTextField({
   highlightKeywords,
   editable = true,
   fieldId,
+  scrollable = false,
 }: {
   value: string;
   onChange: (html: string) => void;
@@ -132,6 +133,8 @@ export function RichTextField({
   onAttachFile?: (file: StoredFile) => void;
   /** Keywords to highlight in the body (CONTROLS › "Highlight in text"). */
   highlightKeywords?: string[];
+  /** Give the editor body a fixed height with its own scrollbar (main content). */
+  scrollable?: boolean;
 }) {
   // Fullscreen is an editor-only overlay (the field fills the viewport), not
   // the browser's native fullscreen — matching the reference's behaviour.
@@ -536,7 +539,7 @@ export function RichTextField({
         fieldId={fieldId}
       />
 
-      <div className={`rt-body ${fullscreen ? 'flex-1 overflow-y-auto' : ''}`}>
+      <div className={`rt-body ${fullscreen ? 'flex-1 overflow-y-auto' : scrollable ? 'max-h-[460px] overflow-y-auto' : ''}`}>
         <EditorContent editor={editor} />
       </div>
 
