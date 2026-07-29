@@ -393,7 +393,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
             current={approval.data?.currentStatus ?? (item.status ? { id: '', name: item.status.name, color: item.status.color } : null)}
             statuses={approval.data?.statuses ?? []}
             busy={changeStatus.isPending}
-            locked={readOnly}
+            locked={statusReadOnly}
             onChange={(id) => changeStatus.mutate(id)}
           />
           {item.canClaim && (
