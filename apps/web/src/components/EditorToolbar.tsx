@@ -174,12 +174,6 @@ export function EditorToolbar({
   const [showBlocks, setShowBlocks] = useState(false);
   const menuBarRef = useRef<HTMLDivElement>(null);
 
-  // Apply a block-level format (blockquote / heading / list / code block) to only
-  // the current soft-line: isolate that line first (splitSoftLine no-ops when
-  // there's nothing to split or when toggling the format off), then run the
-  // command on the now-isolated paragraph. Two steps, so positions are correct.
-  const asLine = (run: () => void) => { editor.commands.splitSoftLine(); run(); };
-
   // Without this the toolbar never updates: the editor mutates in place, so
   // React sees no changed prop and button states stay frozen.
   useEffect(() => {
@@ -421,15 +415,15 @@ export function EditorToolbar({
             <Icon>{I.link}</Icon>
           </BubBtn>
           <BubBtn title="Heading 2" active={editor.isActive('heading', { level: 2 })}
-                  onClick={() => asLine(() => editor.chain().focus().toggleHeading({ level: 2 }).run())}>
+                  onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
             <span className="text-[13px] font-semibold">H2</span>
           </BubBtn>
           <BubBtn title="Heading 3" active={editor.isActive('heading', { level: 3 })}
-                  onClick={() => asLine(() => editor.chain().focus().toggleHeading({ level: 3 }).run())}>
+                  onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>
             <span className="text-[13px] font-semibold">H3</span>
           </BubBtn>
           <BubBtn title="Blockquote" active={editor.isActive('blockquote')}
-                  onClick={() => asLine(() => editor.chain().focus().toggleBlockquote().run())}>
+                  onClick={() => editor.chain().focus().toggleBlockquote().run()}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 17h3l2-4V7H5v6h3l-2 4zm8 0h3l2-4V7h-6v6h3l-2 4z" /></svg>
           </BubBtn>
           <BubBtn title="Insert/edit image" onClick={() => setImageOpen(true)}>
@@ -578,7 +572,7 @@ export function EditorToolbar({
                       <MenuItem key={lvl}
                         label={<span style={{ fontSize: `${1.6 - (lvl - 1) * 0.12}em`, fontWeight: 600 }}>{`Heading ${lvl}`}</span>}
                         active={editor.isActive('heading', { level: lvl })}
-                        onClick={() => { close(); asLine(() => editor.chain().focus().toggleHeading({ level: lvl }).run()); }} />
+                        onClick={() => { close(); editor.chain().focus().toggleHeading({ level: lvl }).run(); }} />
                     ))}
                   </Sub>
                   <Sub label="Inline" width="w-44">
@@ -592,9 +586,9 @@ export function EditorToolbar({
                   </Sub>
                   <Sub label="Blocks" width="w-44">
                     <MenuItem label="Paragraph" check={editor.isActive('paragraph')} onClick={() => { close(); editor.chain().focus().setParagraph().run(); }} />
-                    <MenuItem label={<span className="italic">Blockquote</span>} check={editor.isActive('blockquote')} onClick={() => { close(); asLine(() => editor.chain().focus().toggleBlockquote().run()); }} />
+                    <MenuItem label={<span className="italic">Blockquote</span>} check={editor.isActive('blockquote')} onClick={() => { close(); editor.chain().focus().toggleBlockquote().run(); }} />
                     <MenuItem label="Div" check={editor.isActive('div')} onClick={() => { close(); editor.chain().focus().wrapIn('div').run(); }} />
-                    <MenuItem label={<span className="rounded border border-slate-200 bg-slate-50 px-1.5 font-mono text-[13px]">Pre</span>} check={editor.isActive('codeBlock')} onClick={() => { close(); asLine(() => editor.chain().focus().toggleCodeBlock().run()); }} />
+                    <MenuItem label={<span className="rounded border border-slate-200 bg-slate-50 px-1.5 font-mono text-[13px]">Pre</span>} check={editor.isActive('codeBlock')} onClick={() => { close(); editor.chain().focus().toggleCodeBlock().run(); }} />
                   </Sub>
                   <Sub label="Align" width="w-40">
                     <MenuItem icon={I.alignLeft} label="Left" active={editor.isActive({ textAlign: 'left' })} onClick={() => { close(); editor.chain().focus().setTextAlign('left').run(); }} />
@@ -608,9 +602,9 @@ export function EditorToolbar({
                   <MenuItem label="Paragraph" check={editor.isActive('paragraph')} onClick={() => { close(); editor.chain().focus().setParagraph().run(); }} />
                   {[1, 2, 3, 4].map((lvl) => (
                     <MenuItem key={lvl} label={`Heading ${lvl}`} check={editor.isActive('heading', { level: lvl })}
-                      onClick={() => { close(); asLine(() => editor.chain().focus().toggleHeading({ level: lvl as 1 | 2 | 3 | 4 }).run()); }} />
+                      onClick={() => { close(); editor.chain().focus().toggleHeading({ level: lvl as 1 | 2 | 3 | 4 }).run(); }} />
                   ))}
-                  <MenuItem label="Preformatted" check={editor.isActive('codeBlock')} onClick={() => { close(); asLine(() => editor.chain().focus().toggleCodeBlock().run()); }} />
+                  <MenuItem label="Preformatted" check={editor.isActive('codeBlock')} onClick={() => { close(); editor.chain().focus().toggleCodeBlock().run(); }} />
                   <MenuItem label="Code" check={editor.isActive('code')} onClick={() => { close(); editor.chain().focus().toggleCode().run(); }} />
                 </Sub>
 
@@ -790,11 +784,11 @@ export function EditorToolbar({
         <Divider />
 
         <Btn title="Bullet list" active={editor.isActive('bulletList')}
-             onClick={() => asLine(() => editor.chain().focus().toggleBulletList().run())}>
+             onClick={() => editor.chain().focus().toggleBulletList().run()}>
           <Icon>{I.bulletList}</Icon>
         </Btn>
         <Btn title="Numbered list" active={editor.isActive('orderedList')}
-             onClick={() => asLine(() => editor.chain().focus().toggleOrderedList().run())}>
+             onClick={() => editor.chain().focus().toggleOrderedList().run()}>
           <Icon>{I.orderedList}</Icon>
         </Btn>
         <Btn title="Decrease indent"
