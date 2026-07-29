@@ -422,10 +422,12 @@ export class ContentService {
         : [];
 
       const isAssigned = assignees.some((a) => a.profile_id === user.userId);
+      const meCompleted = assignees.some((a) => a.profile_id === user.userId && a.completed);
       const othersCompleted = assignees.filter((a) => a.profile_id !== user.userId && a.completed).length;
       const { canSubmit, canApprove, isLastToComplete } = workflowActions({
         isFirstStatus: item.is_first as boolean,
         isAssigned,
+        meCompleted,
         assigneeCount: assignees.length,
         othersCompleted,
       });

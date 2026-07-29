@@ -15,6 +15,8 @@ export interface WorkflowActionFacts {
   isFirstStatus: boolean;
   /** Is the caller assigned to the current status? */
   isAssigned: boolean;
+  /** Has the caller ALREADY completed (submitted/approved) the current status? */
+  meCompleted: boolean;
   /** Number of people assigned to the current status. */
   assigneeCount: number;
   /** Assignees OTHER than the caller who have already completed the status. */
@@ -29,8 +31,10 @@ export interface WorkflowActions {
 }
 
 export function workflowActions(f: WorkflowActionFacts): WorkflowActions {
-  const canSubmit = f.isFirstStatus && f.isAssigned;
-  const canApprove = !f.isFirstStatus && f.isAssigned;
+  // Once you've completed the current status your action hides — no re-submit
+  // (matches EC: the option is gone after you've submitted).
+  const canSubmit = f.isFirstStatus && f.isAssigned && !f.meCompleted;
+  const canApprove = !f.isFirstStatus && f.isAssigned && !f.meCompleted;
   // Only I remain: everyone else assigned has completed already.
   const isLastToComplete =
     f.isAssigned && f.assigneeCount > 0 && f.assigneeCount - f.othersCompleted === 1;

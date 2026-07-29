@@ -1,5 +1,95 @@
 import { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Modal, Field, inputClass } from './Modal';
+
+/** "Uploaded 24 Jul — 17Kb" meta line for a picker card. */
+function fileMeta(img: LinkedImage): string {
+  const parts: string[] = [];
+  if (img.uploadedAt) parts.push(`Uploaded ${new Date(img.uploadedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`);
+  if (img.sizeBytes != null) parts.push(`${Math.max(1, Math.round(img.sizeBytes / 1024))}Kb`);
+  return parts.join(' — ');
+}
+
+/**
+ * "Please select an image" — the media picker EasyContent opens from the image
+ * dialog's upload button. Shows the images attached to the current item as
+ * cards (thumbnail + name + upload date/size); clicking one inserts it.
+ */
+function ImagePicker({
+  images, onPick, onClose,
+}: {
+  images: LinkedImage[];
+  onPick: (img: LinkedImage) => void;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = useState<LinkedImage | null>(null);
+  const keyOf = (img: LinkedImage) => img.fullUrl || img.url;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] grid place-items-start bg-black/40 p-6" onMouseDown={onClose}>
+      <div className="mx-auto w-full max-w-6xl rounded-lg bg-white p-6 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="text-2xl font-semibold text-slate-900">Please select an image</h2>
+          <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-800" aria-label="Close">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+        {images.length === 0 ? (
+          <p className="py-16 text-center text-[15px] text-slate-400">No images are linked to this content item yet.</p>
+        ) : (
+          <div className="flex gap-6">
+            <div className="grid flex-1 grid-cols-[repeat(auto-fill,minmax(190px,1fr))] content-start gap-4">
+              {images.map((img) => {
+                const isSel = selected != null && keyOf(selected) === keyOf(img);
+                return (
+                  <button
+                    key={keyOf(img)}
+                    type="button"
+                    onClick={() => setSelected(img)}
+                    onDoubleClick={() => onPick(img)}
+                    className={`flex flex-col overflow-hidden rounded-md border-2 text-left transition ${
+                      isSel ? 'border-amber-400 shadow-md' : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="grid h-[150px] place-items-center overflow-hidden bg-slate-50">
+                      <img src={img.url || img.fullUrl} alt={img.name} className="h-full w-full object-contain" />
+                    </span>
+                    <span className="border-t border-slate-200 px-3 py-2">
+                      <span className="block truncate text-[13px] font-semibold text-slate-800">{img.name}</span>
+                      <span className="block text-[12px] text-slate-400">{fileMeta(img)}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Confirm / cancel, like the reference's floating buttons. */}
+            <div className="flex shrink-0 flex-col items-center gap-4 self-center">
+              <button
+                type="button"
+                disabled={!selected}
+                onClick={() => selected && onPick(selected)}
+                title="Insert selected image"
+                className="grid h-14 w-14 place-items-center rounded-full bg-green-500 text-white shadow-md transition hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6 9 17l-5-5" /></svg>
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                title="Cancel"
+                className="grid h-14 w-14 place-items-center rounded-full border border-slate-300 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 export interface ImageValue {
   src: string;
@@ -17,15 +107,29 @@ export interface ImageValue {
  * Width/Height with an aspect-ratio lock, a caption toggle, and an Upload tab
  * (drop / browse) that uploads via `onUpload` and fills the Source.
  */
+export interface LinkedImage {
+  /** Thumbnail URL for the picker grid. */
+  url: string;
+  /** Full-size URL inserted into the document. */
+  fullUrl: string;
+  name: string;
+  /** ISO upload date + size, for the picker card meta line. */
+  uploadedAt?: string;
+  sizeBytes?: number | null;
+}
+
 export function ImageDialog({
-  initial, onSave, onClose, onUpload,
+  initial, onSave, onClose, onUpload, linkedImages,
 }: {
   initial?: Partial<ImageValue>;
   onSave: (v: ImageValue) => void;
   onClose: () => void;
   /** Upload a file and return its display + full-size URLs. Enables the Upload tab. */
   onUpload?: (file: File) => Promise<{ url: string; fullUrl: string }>;
+  /** Images already attached to the current content item — pickable in the Upload tab. */
+  linkedImages?: LinkedImage[];
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [src, setSrc] = useState(initial?.src ?? '');
   const [alt, setAlt] = useState(initial?.alt ?? '');
   const [width, setWidth] = useState(initial?.width ?? '');
@@ -38,6 +142,14 @@ export function ImageDialog({
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Pick an image already attached to this content item.
+  const pickLinked = (img: LinkedImage) => {
+    setSrc(img.fullUrl || img.url);
+    setFullSrc(img.fullUrl || img.url);
+    probe(img.fullUrl || img.url);
+    setTab('general');
+  };
 
   const doUpload = async (file: File | undefined) => {
     if (!onUpload || !file || !file.type.startsWith('image/')) return;
@@ -141,12 +253,9 @@ export function ImageDialog({
                 />
                 <button
                   type="button"
-                  onClick={() => onUpload && setTab('upload')}
-                  disabled={!onUpload}
-                  title={onUpload ? 'Upload an image' : 'Upload — not available here'}
-                  className={`grid h-9 w-9 shrink-0 place-items-center rounded border border-slate-300 ${
-                    onUpload ? 'text-slate-600 hover:bg-slate-50' : 'cursor-not-allowed text-slate-400'
-                  }`}
+                  onClick={() => setPickerOpen(true)}
+                  title="Select an image linked to this item"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded border border-slate-300 text-slate-600 hover:bg-slate-50"
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                     <path d="M12 15V3m0 0L8 7m4-4 4 4" />
@@ -248,6 +357,14 @@ export function ImageDialog({
           </div>
         )}
       </div>
+
+      {pickerOpen && (
+        <ImagePicker
+          images={linkedImages ?? []}
+          onPick={(img) => { pickLinked(img); setPickerOpen(false); }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </Modal>
   );
 }

@@ -1,22 +1,54 @@
 import { supabase } from './supabase';
 
 /**
+ * Get the current access token. `getSession()` returns the STORED token, which
+ * can be momentarily expired (e.g. right after the laptop wakes, before the
+ * background auto-refresh fires) — so refresh proactively when it's expired or
+ * within 60s of expiring. `forceRefresh` is used to recover from a 401.
+ */
+async function currentToken(forceRefresh = false): Promise<string | null> {
+  if (forceRefresh) {
+    const { data } = await supabase.auth.refreshSession();
+    return data.session?.access_token ?? null;
+  }
+  const { data } = await supabase.auth.getSession();
+  const s = data.session;
+  if (!s) return null;
+  if (s.expires_at != null && s.expires_at * 1000 <= Date.now() + 60_000) {
+    const { data: r } = await supabase.auth.refreshSession();
+    return r.session?.access_token ?? s.access_token;
+  }
+  return s.access_token;
+}
+
+/**
  * Thin client for the NestJS API. Attaches the current user's Supabase access
- * token as a bearer, which the API verifies and uses to enforce RLS.
+ * token as a bearer, which the API verifies and uses to enforce RLS. If the
+ * token has expired (401), force a refresh and retry once before failing.
  */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  let token = await currentToken();
   if (!token) throw new Error('Not signed in');
 
-  const res = await fetch(`${import.meta.env.VITE_API_URL}${path}`, {
+  const send = (t: string) => fetch(`${import.meta.env.VITE_API_URL}${path}`, {
     ...init,
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${token}`,
+      authorization: `Bearer ${t}`,
       ...init?.headers,
     },
   });
+
+  let res = await send(token);
+  // A stale token is rejected by the API's AuthGuard before any handler runs, so
+  // retrying is safe even for POST/DELETE — the original never executed.
+  if (res.status === 401) {
+    const fresh = await currentToken(true);
+    if (fresh && fresh !== token) {
+      token = fresh;
+      res = await send(token);
+    }
+  }
 
   if (!res.ok) {
     const body = await res.text();

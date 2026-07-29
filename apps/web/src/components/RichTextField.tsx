@@ -85,7 +85,9 @@ import { EditorToolbar } from './EditorToolbar';
 import { ImageDialog, type ImageValue } from './ImageDialog';
 import { uploadDerivedImage, uploadLibraryFile, type DerivedImage } from '../lib/upload';
 import { rotateImageToBlob } from '../lib/image-edit';
-import type { StoredFile } from '../lib/api';
+import { useQuery } from '@tanstack/react-query';
+import { api, type StoredFile } from '../lib/api';
+import { useItemId } from '../lib/item-context';
 
 // filerobot is heavy — lazy-load the Edit Image modal so it (and filerobot) stay
 // out of the main bundle and only load when the editor is opened.
@@ -360,6 +362,20 @@ export function RichTextField({
     ? (file: File) => uploadDerivedImage(projectId, file, file.name || 'image.png')
     : undefined;
 
+  // Images LINKED to the current content item — offered in the image dialog's
+  // "Please select an image" picker (the file section itself lists all project
+  // images; the picker is scoped to this item, per EC).
+  const itemId = useItemId();
+  const filesQuery = useQuery({
+    queryKey: ['files', projectId],
+    queryFn: () => api.listFiles(projectId!),
+    enabled: !!projectId,
+  });
+  const linkedImages = (filesQuery.data ?? [])
+    .filter((f) => (f.mime ?? '').startsWith('image/') && f.fullUrl
+      && !!itemId && f.linkedItems.some((li) => li.id === itemId))
+    .map((f) => ({ url: f.url ?? f.fullUrl!, fullUrl: f.fullUrl!, name: f.name, uploadedAt: f.createdAt, sizeBytes: f.sizeBytes }));
+
   // The wrapping <figure> node (if the cursor is inside one) and its position.
   const findFigure = () => {
     const { $from } = editor.state.selection;
@@ -514,6 +530,7 @@ export function RichTextField({
         fullscreen={fullscreen}
         onToggleFullscreen={() => setFullscreen((v) => !v)}
         onUpload={uploadForDialog}
+        linkedImages={linkedImages}
         disabled={!editable}
         fieldId={fieldId}
       />
@@ -524,7 +541,7 @@ export function RichTextField({
 
       {/* Insert/Edit Image — editing the selected image's src/alt/size. */}
       {imgDialog && (
-        <ImageDialog initial={imgDialog} onClose={() => setImgDialog(null)} onSave={applyImgDialog} onUpload={uploadForDialog} />
+        <ImageDialog initial={imgDialog} onClose={() => setImgDialog(null)} onSave={applyImgDialog} onUpload={uploadForDialog} linkedImages={linkedImages} />
       )}
 
       {/* Table Properties — width/height/border/padding/spacing/alignment/colours. */}

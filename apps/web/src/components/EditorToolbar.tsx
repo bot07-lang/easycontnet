@@ -3,7 +3,7 @@ import { BubbleMenu } from '@tiptap/react';
 import { getMarkRange } from '@tiptap/core';
 import { useEffect, useId, useReducer, useRef, useState } from 'react';
 import { BlockTypeMenu, ColorPalette } from './toolbar-parts';
-import { ImageDialog, type ImageValue } from './ImageDialog';
+import { ImageDialog, type ImageValue, type LinkedImage } from './ImageDialog';
 import { TextCommentButton } from './CommentPopover';
 import { ColorPickerDialog } from './ColorPickerDialog';
 import { TableMenu } from './TableMenu';
@@ -139,7 +139,7 @@ const I = {
 };
 
 export function EditorToolbar({
-  editor, docTitle, fullscreen, onToggleFullscreen, onUpload, disabled = false, fieldId,
+  editor, docTitle, fullscreen, onToggleFullscreen, onUpload, linkedImages, disabled = false, fieldId,
 }: {
   editor: Editor;
   docTitle?: string;
@@ -147,6 +147,8 @@ export function EditorToolbar({
   onToggleFullscreen?: () => void;
   /** Enables the Insert Image dialog's Upload tab. */
   onUpload?: (file: File) => Promise<{ url: string; fullUrl: string }>;
+  /** Images attached to the current item — pickable in the image dialog. */
+  linkedImages?: LinkedImage[];
   /** Read-only status: keep the toolbar mounted but greyed + non-interactive
    *  (rather than unmounting it, which churns the DOM next to the portaled
    *  BubbleMenus and can crash React reconciliation). */
@@ -861,7 +863,7 @@ export function EditorToolbar({
           BubbleMenu element crashes React reconciliation (insertBefore /
           NotFoundError); appending at the end avoids that. */}
       {imageOpen && (
-        <ImageDialog onClose={() => setImageOpen(false)} onSave={insertImage} onUpload={onUpload} />
+        <ImageDialog onClose={() => setImageOpen(false)} onSave={insertImage} onUpload={onUpload} linkedImages={linkedImages} />
       )}
       {colorPicker && (
         <ColorPickerDialog initial="#000000"
