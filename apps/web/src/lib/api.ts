@@ -108,6 +108,9 @@ export interface ApiItem {
   id: string;
   /** Caller may claim (self-assign): unassigned + reviewing role + not an assigner. */
   canClaim: boolean;
+  /** Caller may edit: assigned to the current status (or manage_content_items),
+   *  and the current status isn't read-only. False → editor is read-only. */
+  canEdit: boolean;
   itemNumber: number;
   name: string;
   /** Template the item was created from (null if none). */

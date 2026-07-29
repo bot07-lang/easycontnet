@@ -134,9 +134,16 @@ export class ContentService {
         )
       ).rows[0]?.can_claim ?? false) as boolean;
 
+      // Whether the caller may edit (same rule RLS enforces on saves) — so the
+      // editor can go read-only up front instead of letting them type and fail.
+      const canEdit = ((
+        await c.query(`select public.app_can_edit_item($1) as can_edit`, [itemId])
+      ).rows[0]?.can_edit ?? false) as boolean;
+
       return {
         id: item.id,
         canClaim,
+        canEdit,
         itemNumber: item.item_number,
         name: item.name,
         templateId: item.template_id ?? null,

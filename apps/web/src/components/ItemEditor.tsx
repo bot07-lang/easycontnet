@@ -96,15 +96,17 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
   const approval = useQuery({ queryKey: ['approval', item.id], queryFn: () => api.getApprovalInfo(item.id) });
   const [submitOpen, setSubmitOpen] = useState(false);
 
-  // Whether the item's CURRENT status is read-only → the whole editor is locked.
-  // Assignment info carries per-status read_only + the current status; the query is
-  // shared (same key) with the Controls tab, so this adds no extra request.
+  // The editor is locked when the current status is read-only OR the caller
+  // can't edit this item (not assigned to the current status and lacking
+  // manage_content_items). `canEdit` already accounts for the read-only status;
+  // we keep the status flag separate only to show the right banner message.
   const assignment = useQuery({ queryKey: ['assignment', item.id], queryFn: () => api.getAssignmentInfo(item.id) });
-  const readOnly = useMemo(() => {
+  const statusReadOnly = useMemo(() => {
     const a = assignment.data;
     if (!a?.currentStatusId) return false;
     return a.statuses.find((s) => s.id === a.currentStatusId)?.read_only ?? false;
   }, [assignment.data]);
+  const readOnly = statusReadOnly || !item.canEdit;
 
   // Live presence + soft-lock (Level 2 collaboration): who else is viewing this
   // item, and which fields others are editing. The lock follows TYPING — while a
@@ -461,13 +463,18 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
         </div>
       )}
 
-      {/* Read-only status banner — the item can be viewed but not edited. */}
+      {/* Read-only banner — the item can be viewed but not edited, either
+          because the status is read-only or because the caller isn't assigned
+          to the current status (so we lock the editor instead of letting them
+          type and then fail the save). */}
       {!preview && readOnly && (
         <div className="flex items-center gap-2.5 border-b border-amber-200 bg-amber-50 px-5 py-3 text-[13px] font-medium text-amber-800">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
             <rect x="4" y="11" width="16" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
           </svg>
-          This status is set as read-only. Content items in read-only statuses cannot be edited.
+          {statusReadOnly
+            ? 'This status is set as read-only. Content items in read-only statuses cannot be edited.'
+            : 'You’re not allowed to edit this item.'}
         </div>
       )}
 
