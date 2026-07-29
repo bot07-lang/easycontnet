@@ -75,7 +75,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import Superscript from '@tiptap/extension-superscript';
 import Subscript from '@tiptap/extension-subscript';
 import FontFamily from '@tiptap/extension-font-family';
-import { FontSize, LineHeight, Div, Indent } from './editor-extensions';
+import { FontSize, LineHeight, Div, Indent, SoftLineBlocks } from './editor-extensions';
 import { Figure } from './editor-figure';
 import { TableWithProps, type TableProps } from './editor-table-props';
 import { TablePropsDialog } from './TablePropsDialog';
@@ -152,6 +152,7 @@ export function RichTextField({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3, 4, 5, 6] } }),
       Div,
+      SoftLineBlocks,
       Underline,
       TitledLink.configure({ openOnClick: false, HTMLAttributes: { rel: 'noopener' } }),
       // inline:true so an image lives inside a paragraph and serialises as

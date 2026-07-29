@@ -1,5 +1,6 @@
 import { Extension, Node, type CommandProps } from '@tiptap/core';
-import type { Node as PMNode } from '@tiptap/pm/model';
+import { Fragment, type Node as PMNode } from '@tiptap/pm/model';
+import { TextSelection } from '@tiptap/pm/state';
 
 /**
  * A plain block container, so Format › Formats › Blocks › Div can wrap content
@@ -27,6 +28,11 @@ export const Div = Node.create({
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
+    softLineBlocks: {
+      /** Isolate the current soft-line(s) into their own paragraph so a block
+       *  format applied next hits only that line, not the whole <br> paragraph. */
+      splitSoftLine: () => ReturnType;
+    };
     fontSize: {
       setFontSize: (size: string) => ReturnType;
       unsetFontSize: () => ReturnType;
@@ -41,6 +47,109 @@ declare module '@tiptap/core' {
     };
   }
 }
+
+/**
+ * Soft-line awareness for block formats. Text lines joined by <br> live in ONE
+ * paragraph, so a block command (blockquote, heading, list, code block) applied
+ * to a cursor on one line wraps the WHOLE paragraph. `splitSoftLine` first
+ * isolates the selected line(s) into their own paragraph — leaving the lines
+ * before/after grouped as they were — so the format applied next hits only that
+ * line. A selection spanning the whole paragraph isolates all of it (so the
+ * format still applies to everything). It no-ops (leaving the doc untouched) for
+ * paragraphs with no breaks, multi-paragraph selections, non-paragraph blocks,
+ * or list/table/blockquote contexts — so it is always safe to call before any
+ * block command, including when toggling a format back off.
+ */
+export const SoftLineBlocks = Extension.create({
+  name: 'softLineBlocks',
+
+  addCommands() {
+    return {
+      splitSoftLine:
+        () =>
+        ({ state, dispatch }: CommandProps) => {
+          const { schema, selection } = state;
+          const paragraph = schema.nodes.paragraph;
+          const hardBreak = schema.nodes.hardBreak;
+          const { $from, $to } = selection;
+
+          // Nearest ancestor paragraph shared by both ends, hosted where a new
+          // sibling block is legal (top level or inside a <div>).
+          let depth = $from.depth;
+          while (depth > 0 && $from.node(depth).type.name !== 'paragraph') depth--;
+          const para = depth > 0 ? $from.node(depth) : null;
+          const parentType = depth > 0 ? $from.node(depth - 1).type.name : '';
+          const canHost = parentType === 'doc' || parentType === 'div';
+          if (!paragraph || !hardBreak || !para || para.type !== paragraph
+              || $to.node(depth) !== para || !canHost) {
+            return true; // nothing to isolate — leave the doc as-is
+          }
+
+          // Split the paragraph content into <br>-delimited lines.
+          type Line = { start: number; end: number; nodes: PMNode[] };
+          const lines: Line[] = [];
+          let acc: PMNode[] = [];
+          let offset = 0;
+          let lineStart = 0;
+          para.content.forEach((node) => {
+            if (node.type === hardBreak) {
+              lines.push({ start: lineStart, end: offset, nodes: acc });
+              acc = [];
+              offset += node.nodeSize;
+              lineStart = offset;
+            } else {
+              acc.push(node);
+              offset += node.nodeSize;
+            }
+          });
+          lines.push({ start: lineStart, end: offset, nodes: acc });
+
+          if (lines.length <= 1) return true; // no soft breaks
+
+          const contentStart = $from.before(depth) + 1;
+          const selFrom = $from.pos - contentStart;
+          const selTo = $to.pos - contentStart;
+
+          let firstIdx = lines.findIndex((l) => selFrom <= l.end);
+          if (firstIdx === -1) firstIdx = lines.length - 1;
+          let lastIdx = firstIdx;
+          for (let i = lines.length - 1; i >= 0; i--) {
+            if (lines[i]!.start <= selTo) { lastIdx = i; break; }
+          }
+          if (lastIdx < firstIdx) lastIdx = firstIdx;
+
+          // Whole paragraph already selected → nothing to isolate.
+          if (firstIdx === 0 && lastIdx === lines.length - 1) return true;
+
+          const joined = (group: Line[]): PMNode[] => {
+            const out: PMNode[] = [];
+            group.forEach((l, i) => {
+              if (i > 0) out.push(hardBreak.create());
+              out.push(...l.nodes);
+            });
+            return out;
+          };
+          const mkPara = (group: Line[]) => paragraph.create(para.attrs, Fragment.fromArray(joined(group)));
+
+          const before = firstIdx > 0 ? [mkPara(lines.slice(0, firstIdx))] : [];
+          const middle = mkPara(lines.slice(firstIdx, lastIdx + 1));
+          const after = lastIdx < lines.length - 1 ? [mkPara(lines.slice(lastIdx + 1))] : [];
+
+          const paraPos = $from.before(depth);
+          const replacement = [...before, middle, ...after];
+          const tr = state.tr.replaceWith(paraPos, paraPos + para.nodeSize, Fragment.fromArray(replacement));
+
+          // Keep the cursor on the now-isolated middle paragraph.
+          const beforeSize = before.reduce((n, p) => n + p.nodeSize, 0);
+          const cursor = paraPos + beforeSize + 1;
+          tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(cursor, tr.doc.content.size))));
+
+          if (dispatch) dispatch(tr.scrollIntoView());
+          return true;
+        },
+    };
+  },
+});
 
 export const FontSize = Extension.create({
   name: 'fontSize',
