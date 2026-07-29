@@ -32,12 +32,12 @@ class DashboardController {
                select count(*) from public.content_items ci
                join public.workflow_statuses s on s.id = ci.current_status_id
                where ci.project_id = p.id and s.is_terminal = false), 0)::int as active_count,
-             -- overdue = current-status assignment past its due date
+             -- overdue = current status's due date is in the past
              coalesce((
                select count(distinct ci.id) from public.content_items ci
-               join public.item_status_assignees a
-                 on a.item_id = ci.id and a.status_id = ci.current_status_id
-               where ci.project_id = p.id and a.due_at is not null and a.due_at < now()), 0)::int as overdue_count,
+               join public.item_status_due_dates d
+                 on d.item_id = ci.id and d.status_id = ci.current_status_id
+               where ci.project_id = p.id and d.due_at is not null and d.due_at < now()), 0)::int as overdue_count,
              (select max(ci.updated_at) from public.content_items ci
                 where ci.project_id = p.id) as last_activity,
              coalesce((

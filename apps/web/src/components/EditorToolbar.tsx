@@ -4,6 +4,7 @@ import { getMarkRange } from '@tiptap/core';
 import { useEffect, useId, useReducer, useRef, useState } from 'react';
 import { BlockTypeMenu, ColorPalette } from './toolbar-parts';
 import { ImageDialog, type ImageValue } from './ImageDialog';
+import { TextCommentButton } from './CommentPopover';
 import { ColorPickerDialog } from './ColorPickerDialog';
 import { TableMenu } from './TableMenu';
 import { LinkDialog, type LinkValues } from './LinkDialog';
@@ -138,7 +139,7 @@ const I = {
 };
 
 export function EditorToolbar({
-  editor, docTitle, fullscreen, onToggleFullscreen, onUpload, disabled = false,
+  editor, docTitle, fullscreen, onToggleFullscreen, onUpload, disabled = false, fieldId,
 }: {
   editor: Editor;
   docTitle?: string;
@@ -150,6 +151,8 @@ export function EditorToolbar({
    *  (rather than unmounting it, which churns the DOM next to the portaled
    *  BubbleMenus and can crash React reconciliation). */
   disabled?: boolean;
+  /** The field's id — enables the selection-bubble "comment" action. */
+  fieldId?: string;
 }) {
   const [, forceRender] = useReducer((n: number) => n + 1, 0);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -429,14 +432,31 @@ export function EditorToolbar({
           <TableMenu editor={editor} />
           <span className="mx-1 h-6 w-px bg-slate-200" />
 
-          {/* Comments are Phase 2 — shown to match the reference, disabled for now. */}
-          <BubBtn title="Add a comment — coming in Phase 2" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
-              <line x1="12" y1="8" x2="12" y2="13" /><line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
-            </svg>
-          </BubBtn>
+          {/* Comment on the highlighted text (a text-anchored comment). */}
+          {fieldId ? (
+            <TextCommentButton
+              fieldId={fieldId}
+              getQuote={() => {
+                const { from, to } = editor.state.selection;
+                if (from === to) return null;
+                return editor.state.doc.textBetween(from, to, ' ').trim().slice(0, 300) || null;
+              }}
+              title="Comment on selection"
+              buttonClass="flex h-8 min-w-8 items-center justify-center rounded px-1.5 text-slate-700 transition hover:bg-slate-100"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
+                <line x1="12" y1="8" x2="12" y2="13" /><line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
+              </svg>
+            </TextCommentButton>
+          ) : (
+            <BubBtn title="Add a comment" disabled>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
+                <line x1="12" y1="8" x2="12" y2="13" /><line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
+              </svg>
+            </BubBtn>
+          )}
         </div>
       </BubbleMenu>
 

@@ -44,8 +44,17 @@ export interface ItemSummary {
   status_index: number | null;
   is_terminal: boolean;
   mine: boolean;
+  /** Assignees of the item's CURRENT status. */
   people: { name: string; role?: string | null }[];
+  /** First assignee of the INITIAL status (the writer/author), or null. */
+  author: { name: string; role?: string | null } | null;
+  /** True when the item's current status is the first (initial) status. */
+  in_first_status: boolean;
   next_due_date: string | null;
+  /** Caller may open the assign-people affordance (has manage_people_and_deadlines). */
+  can_assign: boolean;
+  /** Caller may claim (self-assign): unassigned item + reviewing role + not an assigner. */
+  can_claim: boolean;
 }
 
 /** Shape returned by GET /content/items/:id — matches the editor's field model. */
@@ -65,6 +74,8 @@ export interface ApiField {
 
 export interface ApiItem {
   id: string;
+  /** Caller may claim (self-assign): unassigned + reviewing role + not an assigner. */
+  canClaim: boolean;
   itemNumber: number;
   name: string;
   /** Template the item was created from (null if none). */
@@ -75,6 +86,35 @@ export interface ApiItem {
   description: string | null;
   status: { name: string; color: string } | null;
   tabs: { id: string; name: string; fields: ApiField[] }[];
+}
+
+/** A comment on a content item (item / field / text / file anchored; threaded). */
+export interface ItemComment {
+  id: string;
+  item_id: string;
+  anchor: 'item' | 'field' | 'text' | 'file';
+  field_id: string | null;
+  file_id: string | null;
+  text_anchor: unknown;
+  parent_id: string | null;
+  author_id: string;
+  author_name: string;
+  author_role: string | null;
+  body: string;
+  resolved: boolean;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewComment {
+  body: string;
+  anchor?: 'item' | 'field' | 'text' | 'file';
+  fieldId?: string | null;
+  fileId?: string | null;
+  textAnchor?: unknown;
+  parentId?: string | null;
 }
 
 export interface DashboardMember {
@@ -159,11 +199,19 @@ export interface WorkflowConfig {
 
 export interface ApprovalInfo {
   currentStatus: { id: string; name: string; color: string } | null;
+  /** True when the current status is the first (initial) status → Submit, not Approve. */
+  isFirstStatus: boolean;
   nextStatusId: string | null;
   statuses: { id: string; name: string; color: string; position: number; is_terminal: boolean }[];
   criteria: { id: string; name: string; description: string | null }[];
-  /** Whether the caller's role may act on (approve from) the current status. */
+  /** Assignees of the current status + whether each has completed it. */
+  assignees: { id: string; name: string; completed: boolean }[];
+  /** Whether the caller (assigned) may approve on this review status. */
   canApprove: boolean;
+  /** Whether the caller (assigned) may submit on this first status. */
+  canSubmit: boolean;
+  /** If the caller completes now, would they be the last → auto-check "send forward". */
+  isLastToComplete: boolean;
 }
 
 export interface AssignmentStatus {
@@ -175,7 +223,7 @@ export interface AssignmentStatus {
   is_terminal: boolean;
   read_only: boolean;
   reviewing_role_ids: string[];
-  assignees: { id: string; name: string }[];
+  assignees: { id: string; name: string; completed: boolean; note: string | null }[];
   /** Shared per-status due date (ISO), or null. */
   due_at: string | null;
 }
@@ -300,11 +348,15 @@ export const api = {
     request<{ ok: true }>(`/content/items/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   changeItemStatus: (id: string, statusId: string) =>
     request<{ ok: true }>(`/content/items/${id}/status`, { method: 'PATCH', body: JSON.stringify({ statusId }) }),
+  claimItem: (id: string) =>
+    request<{ ok: true }>(`/content/items/${id}/claim`, { method: 'POST' }),
   getApprovalInfo: (id: string) => request<ApprovalInfo>(`/content/items/${id}/approval`),
   approveItem: (
     id: string,
     body: { ratings: { ratingId: string; stars: number }[]; note: string | null; nextStatusId: string | null },
   ) => request<{ ok: true }>(`/content/items/${id}/approve`, { method: 'POST', body: JSON.stringify(body) }),
+  submitItem: (id: string, body: { note: string | null; nextStatusId: string | null }) =>
+    request<{ ok: true; advanced: boolean; isLast: boolean }>(`/content/items/${id}/submit`, { method: 'POST', body: JSON.stringify(body) }),
   listVersions: (id: string) => request<ItemVersion[]>(`/content/items/${id}/versions`),
   saveVersion: (id: string, label?: string) =>
     request<{ id: string }>(`/content/items/${id}/versions`, {
@@ -437,6 +489,18 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ value }),
     }),
+
+  // Comments -----------------------------------------------------------------
+  listComments: (itemId: string) =>
+    request<ItemComment[]>(`/content/items/${itemId}/comments`),
+  addComment: (itemId: string, input: NewComment) =>
+    request<{ id: string }>(`/content/items/${itemId}/comments`, { method: 'POST', body: JSON.stringify(input) }),
+  editComment: (id: string, body: string) =>
+    request<{ ok: true }>(`/comments/${id}`, { method: 'PATCH', body: JSON.stringify({ body }) }),
+  deleteComment: (id: string) =>
+    request<{ ok: true }>(`/comments/${id}`, { method: 'DELETE' }),
+  resolveComment: (id: string, resolved: boolean) =>
+    request<{ ok: true }>(`/comments/${id}/resolve`, { method: 'POST', body: JSON.stringify({ resolved }) }),
 
   /* ---- project file library ---- */
   listFiles: (projectId: string) =>

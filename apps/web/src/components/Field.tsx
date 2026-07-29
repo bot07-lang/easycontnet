@@ -1,13 +1,12 @@
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { ContentField } from '../mock/article';
 import { api, type LibraryFile, type StoredFile } from '../lib/api';
 import { FieldCounter } from './FieldCounter';
 import { RichTextField } from './RichTextField';
 import { AddFilesDialog, downloadFile, formatSize } from './AddFilesDialog';
-
-/** Flip on when Phase 2 delivers comments. */
-const SHOW_COMMENT_BADGES = false;
+import { CommentPopoverTrigger } from './CommentPopover';
 
 /**
  * Renders one field.
@@ -17,27 +16,14 @@ const SHOW_COMMENT_BADGES = false;
  * (heading, guidelines) hold no value and render as bare text.
  */
 
-function CommentBadge({ count }: { count: number }) {
-  return (
-    <span className="relative inline-flex items-center" title={`${count} comment${count === 1 ? '' : 's'}`}>
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           strokeWidth="1.8" className="text-slate-600">
-        <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5z" />
-      </svg>
-      <span className="absolute -right-2 -top-1.5 grid h-[17px] min-w-[17px] place-items-center
-                       rounded-full bg-orange-500 px-1 text-[10px] font-semibold text-white">
-        {count}
-      </span>
-    </span>
-  );
-}
-
 function FieldShell({
-  field, value, children,
+  field, value, children, headerAction,
 }: {
   field: ContentField;
   value: unknown;
   children: React.ReactNode;
+  /** Optional control shown at the header's right edge (e.g. the featured-image picker button). */
+  headerAction?: React.ReactNode;
 }) {
   return (
     <section className="group relative rounded border border-slate-200 bg-white">
@@ -45,12 +31,22 @@ function FieldShell({
                          bg-slate-50/70 px-5 py-3">
         <h3 className="flex items-center gap-2.5 text-[15px] font-semibold text-slate-900">
           {field.label}
-          {/* Comment badges are hidden until Phase 2 ships comments — showing a
-              count for a feature that does not exist yet reads as a bug. */}
-          {SHOW_COMMENT_BADGES && field.commentCount ? (
-            <CommentBadge count={field.commentCount} />
-          ) : null}
+          {/* Comment count badge — appears next to the field title once the field
+              has comments; clicking it opens that field's comment thread. */}
+          <CommentPopoverTrigger
+            match={(c) => (c.anchor === 'field' || c.anchor === 'text') && c.field_id === field.id}
+            newAnchor={{ anchor: 'field', fieldId: field.id }}
+            title="Comments on this field"
+            hideWhenEmpty
+            badgePlacement="tr"
+            buttonClass="grid place-items-center text-slate-400 hover:text-slate-600"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 4h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-4 4v-4H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" />
+            </svg>
+          </CommentPopoverTrigger>
         </h3>
+        {headerAction}
         {/* Word/character counts only make sense for text fields. */}
         {(field.type === 'single_line_text' || field.type === 'paragraph_text') && (
           <FieldCounter field={field} value={value} />
@@ -65,24 +61,25 @@ function FieldShell({
         </p>
       )}
 
-      {/* Round comment affordance floating in the right gutter, vertically
-          centred, appearing on hover — matching the reference. Phase 2, so
-          disabled. */}
-      <button
-        type="button"
-        disabled
-        title="Comment on this field — coming in Phase 2"
-        className="absolute right-3 top-1/2 hidden h-9 w-9 -translate-y-1/2 cursor-not-allowed
-                   place-items-center rounded-full border border-slate-300 bg-white text-slate-400
-                   shadow-sm group-hover:grid"
-      >
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
-          <line x1="12" y1="8" x2="12" y2="13" />
-          <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
-        </svg>
-      </button>
+      {/* Round comment affordance floating in the right gutter — appears only on
+          hover, no count badge (the count lives on the field-header badge). */}
+      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+        <CommentPopoverTrigger
+          match={(c) => (c.anchor === 'field' || c.anchor === 'text') && c.field_id === field.id}
+          newAnchor={{ anchor: 'field', fieldId: field.id }}
+          title="Comment on this field"
+          revealOnHover
+          hideBadge
+          badgePlacement="tr"
+          buttonClass="grid h-9 w-9 place-items-center rounded-full border border-slate-300 bg-white text-slate-500 shadow-sm hover:text-slate-700"
+        >
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
+            <line x1="12" y1="8" x2="12" y2="13" />
+            <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
+          </svg>
+        </CommentPopoverTrigger>
+      </div>
     </section>
   );
 }
@@ -164,10 +161,18 @@ function FilesField({
                 {/* Constant action toolbar over the image, matching the reference. */}
                 <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between p-1.5">
                   <div className="flex gap-1">
-                    <CardBtn title="Comment — coming in Phase 2" disabled>
-                      <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
-                      <path d="M12 8v5M9.5 10.5h5" />
-                    </CardBtn>
+                    <CommentPopoverTrigger
+                      match={(c) => c.anchor === 'file' && c.file_id === f.id}
+                      newAnchor={{ anchor: 'file', fileId: f.id }}
+                      title="Comment on this file"
+                      badgePlacement="tr"
+                      buttonClass="grid h-7 w-7 place-items-center rounded bg-white/85 text-slate-600 shadow transition hover:bg-white hover:text-slate-900"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
+                        <path d="M12 8v5M9.5 10.5h5" />
+                      </svg>
+                    </CommentPopoverTrigger>
                     <CardBtn title="View" disabled={!lib?.fullUrl} onClick={() => lib?.fullUrl && setViewUrl(lib.fullUrl)}>
                       <circle cx="11" cy="11" r="6" /><path d="m20 20-3.5-3.5M11 8.5v5M8.5 11h5" />
                     </CardBtn>
@@ -400,6 +405,20 @@ export function Field({
     );
   }
 
+  if (field.type === 'single_image') {
+    // The featured image: pick ONE image from the project's uploaded files
+    // (matching EasyContent). Stored as the chosen image's URL + alt text.
+    return (
+      <SingleImageField
+        field={field}
+        projectId={projectId}
+        value={(field.value ?? {}) as { url?: string; alt?: string }}
+        onChange={set}
+        readOnly={readOnly}
+      />
+    );
+  }
+
   if (field.type === 'featured_image') {
     const v = (field.value ?? {}) as { url?: string; alt?: string };
     return (
@@ -486,6 +505,7 @@ export function Field({
           onAttachFile={onAttachFile}
           highlightKeywords={highlightKeywords}
           editable={!readOnly}
+          fieldId={field.id}
         />
       </FieldShell>
     );
@@ -515,4 +535,134 @@ function timeAgo(iso: string): string {
   if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
   const days = Math.round(hrs / 24);
   return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+type ImgValue = { url?: string; alt?: string };
+
+/**
+ * The Featured Image (`single_image`) field, matching EasyContent: a camera
+ * button in the header opens a picker of the project's already-uploaded images;
+ * choosing one stores its URL (+ alt) and shows a preview. The URL stays
+ * editable so a link can also be pasted directly.
+ */
+function SingleImageField({
+  field, projectId, value, onChange, readOnly,
+}: {
+  field: ContentField;
+  projectId?: string;
+  value: ImgValue;
+  onChange: (v: ImgValue) => void;
+  readOnly: boolean;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Always show the camera (the picker trigger); it's just disabled in a
+  // read-only status, like the URL/alt inputs below.
+  const camera = projectId ? (
+    <button type="button" disabled={readOnly} onClick={() => setPickerOpen(true)} title="Select an image"
+            className="grid h-9 w-11 shrink-0 place-items-center rounded bg-slate-200 text-slate-600 transition hover:bg-slate-300 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-200">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M3 4V1h2v3h3v2H5v3H3V6H0V4h3zm3 6V7h3V4h7l1.83 2H21c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V10h3zm7 9c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-3.2-5c0 1.77 1.43 3.2 3.2 3.2s3.2-1.43 3.2-3.2-1.43-3.2-3.2-3.2-3.2 1.43-3.2 3.2z" />
+      </svg>
+    </button>
+  ) : undefined;
+  return (
+    <FieldShell field={field} value={null} headerAction={camera}>
+      <div className="space-y-3 px-5 py-5">
+        <input
+          type="url"
+          value={value.url ?? ''}
+          readOnly={readOnly}
+          onChange={(e) => onChange({ ...value, url: e.target.value })}
+          placeholder="Image URL"
+          className="w-full rounded border border-slate-300 px-3 py-2 text-[14px] text-slate-800 read-only:bg-slate-50"
+        />
+        <input
+          type="text"
+          value={value.alt ?? ''}
+          readOnly={readOnly}
+          onChange={(e) => onChange({ ...value, alt: e.target.value })}
+          placeholder="Alt text (optional)"
+          className="w-full rounded border border-slate-300 px-3 py-2 text-[14px] text-slate-800 read-only:bg-slate-50"
+        />
+        {value.url && (
+          <img src={value.url} alt={value.alt ?? ''} className="max-h-64 rounded border border-slate-200 object-contain" />
+        )}
+      </div>
+
+      {pickerOpen && projectId && (
+        <SingleImagePicker
+          projectId={projectId}
+          onSelect={(url) => { onChange({ ...value, url }); setPickerOpen(false); }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+    </FieldShell>
+  );
+}
+
+/** "Please select an image" — a single-select grid of the project's uploaded
+ *  images; the chosen one gets a gold ring, confirmed with the green ✓. */
+function SingleImagePicker({
+  projectId, onSelect, onClose,
+}: {
+  projectId: string;
+  onSelect: (url: string) => void;
+  onClose: () => void;
+}) {
+  const library = useQuery({ queryKey: ['files', projectId], queryFn: () => api.listFiles(projectId), refetchOnMount: 'always' });
+  const images = (library.data ?? []).filter((f) => (f.mime ?? '').startsWith('image/'));
+  const [sel, setSel] = useState<string | null>(null);
+  const chosen = images.find((f) => f.id === sel);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-900/40 p-6" onMouseDown={onClose}>
+      <div className="max-h-[88vh] w-[1080px] max-w-full overflow-y-auto rounded-lg bg-white p-8 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between">
+          <h2 className="text-[24px] font-semibold text-slate-900">Please select an image</h2>
+          <button type="button" onClick={onClose} className="grid h-9 w-9 shrink-0 place-items-center rounded text-slate-500 hover:bg-slate-100">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="mt-6 flex gap-6">
+          <div className="min-w-0 flex-1">
+            {library.isLoading ? (
+              <p className="py-10 text-center text-sm text-slate-400">Loading…</p>
+            ) : images.length === 0 ? (
+              <p className="py-10 text-center text-sm text-slate-400">No images have been uploaded to this project yet.</p>
+            ) : (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-4">
+                {images.map((f) => (
+                  <button key={f.id} type="button" onClick={() => setSel(f.id)}
+                          className={`overflow-hidden rounded-lg border-2 text-left transition ${sel === f.id ? 'border-amber-400' : 'border-slate-200 hover:border-slate-300'}`}>
+                    <div className="h-[160px] bg-slate-100">
+                      {f.url && <img src={f.url} alt="" className="h-full w-full object-cover" />}
+                    </div>
+                    <div className="p-2">
+                      <p className="truncate text-[14px] font-semibold text-slate-800">{f.name}</p>
+                      <p className="mt-0.5 text-[12px] text-slate-400">Uploaded {timeAgo(f.createdAt)}{f.sizeBytes ? ` — ${formatSize(f.sizeBytes)}` : ''}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex shrink-0 flex-col gap-3 pt-1">
+            <button type="button" disabled={!chosen}
+                    onClick={() => chosen && onSelect(chosen.fullUrl ?? chosen.url ?? '')}
+                    title="Confirm"
+                    className="grid h-14 w-14 place-items-center rounded-full bg-green-500 text-white transition hover:bg-green-600 disabled:opacity-40">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6 9 17l-5-5" /></svg>
+            </button>
+            <button type="button" onClick={onClose} title="Cancel"
+                    className="grid h-14 w-14 place-items-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-50">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
 }

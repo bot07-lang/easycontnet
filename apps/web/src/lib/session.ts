@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { supabase, DEV_PASSWORD } from './supabase';
+import { supabase, DEV_PASSWORD, DEV_USERS } from './supabase';
+
+/** The current user's id + display name, for presence/collaboration. Null when
+ *  signed out. Name resolves from the seeded users (a real profile later). */
+export function useMe(): { userId: string; name: string } | null {
+  const { session } = useSession();
+  if (!session?.user) return null;
+  const email = session.user.email;
+  const name = DEV_USERS.find((u) => u.email === email)?.name ?? email ?? 'You';
+  return { userId: session.user.id, name };
+}
 
 /** Tracks the current Supabase session. */
 export function useSession() {

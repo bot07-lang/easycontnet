@@ -68,7 +68,10 @@ export function AssignDialog({
   const save = useMutation({
     mutationFn: async () => {
       for (const s of data!.statuses) {
+        // Only current + future non-terminal statuses are editable; skip the rest
+        // so a read-only past status is never re-written.
         if (s.is_terminal) continue;
+        if (!(currentPos < 0 || s.position >= currentPos)) continue;
         const before = new Set(s.assignees.map((a) => a.id));
         const beforeDue = s.due_at ? s.due_at.slice(0, 10) : null;
         const now = rows[s.id];
@@ -126,9 +129,13 @@ export function AssignDialog({
                   {data.statuses.map((s) => {
                     const isCurrent = s.id === data.currentStatusId;
                     const isComplete = currentPos >= 0 && s.position < currentPos;
+                    // Editable only for statuses the item hasn't passed yet (current +
+                    // future), and never for the terminal status. Past (already-
+                    // completed) statuses are shown read-only, matching the reference.
+                    const editable = !s.is_terminal && (currentPos < 0 || s.position >= currentPos);
                     const row = rows[s.id] ?? { assignees: new Set<string>(), dueAt: null };
                     return (
-                      <tr key={s.id} className={`border-t border-slate-200 align-middle ${isCurrent ? 'bg-slate-50' : ''}`}>
+                      <tr key={s.id} className={`border-t border-slate-200 align-middle ${isCurrent ? 'bg-slate-50' : ''} ${isComplete ? 'opacity-50' : ''}`}>
                         {/* Status */}
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-2.5">
@@ -139,7 +146,7 @@ export function AssignDialog({
 
                         {/* Responsible */}
                         <td className="px-5 py-4">
-                          {s.is_terminal ? null : (
+                          {s.is_terminal ? null : editable ? (
                             <ResponsibleCell
                               status={s}
                               selected={row.assignees}
@@ -149,13 +156,17 @@ export function AssignDialog({
                               onOpenPicker={() => setOpenPicker((c) => (c === s.id ? null : s.id))}
                               onToggle={(pid) => toggle(s.id, pid)}
                             />
+                          ) : (
+                            <ReadonlyResponsible selected={row.assignees} memberById={memberById} />
                           )}
                         </td>
 
                         {/* Due date */}
                         <td className="px-5 py-4">
-                          {s.is_terminal ? null : (
+                          {s.is_terminal ? null : editable ? (
                             <DueDateCell value={row.dueAt} onChange={(d) => setDue(s.id, d)} />
+                          ) : (
+                            <ReadonlyDue value={row.dueAt} />
                           )}
                         </td>
                       </tr>
@@ -304,6 +315,38 @@ function PeoplePicker({
       )}
     </div>,
     document.body,
+  );
+}
+
+/** Read-only Responsible cell for a past (already-completed) status: names as
+ *  plain chips, no picker or remove. Empty statuses show nothing. */
+function ReadonlyResponsible({ selected, memberById }: { selected: Set<string>; memberById: Map<string, Member> }) {
+  const chosen = [...selected].map((id) => memberById.get(id)).filter(Boolean) as Member[];
+  if (chosen.length === 0) return <span className="text-slate-300">—</span>;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {chosen.map((m) => (
+        <span key={m.id} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 py-0.5 pl-0.5 pr-2.5 text-[14px] text-slate-500">
+          <Avatar name={m.name} size={22} />
+          {m.name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Read-only Due-date cell for a past status: the date, or a greyed "No due
+ *  date" with a calendar icon, matching the reference. */
+function ReadonlyDue({ value }: { value: string | null }) {
+  return (
+    <span className="flex items-center gap-2 text-[15px] text-slate-400">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
+      </svg>
+      {value
+        ? new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(' ', '-')
+        : 'No due date'}
+    </span>
   );
 }
 

@@ -8,8 +8,14 @@ import * as saveManager from '../lib/save-manager';
 import type { ContentField } from '../mock/article';
 import { Field } from './Field';
 import { ControlsTab } from './ControlsTab';
+import { CommentsTab } from './CommentsTab';
+import { SubmitModal } from './SubmitModal';
+import { ItemIdContext } from '../lib/item-context';
 import { toast } from '../lib/toast';
 import { toPlainText } from '../lib/counts';
+import { useMe } from '../lib/session';
+import { useItemPresence, type Peer } from '../lib/presence';
+import { avatarColor, avatarInitial } from '../lib/avatar';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'retrying' | 'error';
 
@@ -85,8 +91,10 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
   const [highlightKeywords, setHighlightKeywords] = useState<string[]>([]);
   const mainContentText = mainFieldId ? toPlainText(String(values[mainFieldId] ?? '')) : '';
 
-  // Approval info drives the top-bar status dropdown (current status + ladder).
+  // Approval info drives the top-bar status dropdown (current status + ladder)
+  // and the Submit / Approve actions.
   const approval = useQuery({ queryKey: ['approval', item.id], queryFn: () => api.getApprovalInfo(item.id) });
+  const [submitOpen, setSubmitOpen] = useState(false);
 
   // Whether the item's CURRENT status is read-only → the whole editor is locked.
   // Assignment info carries per-status read_only + the current status; the query is
@@ -97,6 +105,21 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
     if (!a?.currentStatusId) return false;
     return a.statuses.find((s) => s.id === a.currentStatusId)?.read_only ?? false;
   }, [assignment.data]);
+
+  // Live presence + soft-lock (Level 2 collaboration): who else is viewing this
+  // item, and which fields others are editing. The lock follows TYPING — while a
+  // field is being edited we heartbeat it (throttled); it expires a few seconds
+  // after typing stops (TTL in presence.ts). No focus/blur, so it can't misfire.
+  const me = useMe();
+  const { peers, heartbeatLock, lockedByField } = useItemPresence(item.id, me);
+  const lastBeat = useRef<{ fid: string; at: number }>({ fid: '', at: 0 });
+  const noteEditing = (fieldId: string) => {
+    const now = Date.now();
+    if (lastBeat.current.fid !== fieldId || now - lastBeat.current.at > 1500) {
+      lastBeat.current = { fid: fieldId, at: now };
+      heartbeatLock(fieldId);
+    }
+  };
 
   // Flush any pending field edits NOW and wait for them. Called before a status
   // change so moving an item INTO a read-only status saves the edits while it's
@@ -126,6 +149,17 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
     },
   });
 
+  const claim = useMutation({
+    mutationFn: () => api.claimItem(item.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['item', item.id] });
+      void qc.invalidateQueries({ queryKey: ['assignment', item.id] });
+      if (projectId) void qc.invalidateQueries({ queryKey: ['items', projectId] });
+      toast('Claimed — assigned to you.');
+    },
+    onError: () => toast('Could not claim this item.'),
+  });
+
   // Export the item as a standalone HTML file. Resolves fresh signed URLs for any
   // asset fields first (the stored value only keeps file references, not URLs).
   const exportHtml = async () => {
@@ -142,6 +176,31 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
       }
     }
     downloadText(`${item.name || 'content'}.html`, buildItemHtml(item, values, fileUrls, exportDateLabel()), 'text/html');
+  };
+
+  // Export the item as a .docx. Same live values + resolved asset URLs as the
+  // HTML export; the builder (and the heavy `docx` library) is dynamically
+  // imported so it stays out of the main bundle.
+  const exportDocx = async () => {
+    setExportOpen(false);
+    const fileUrls = new Map<string, string>();
+    const hasFiles = item.tabs.some((t) => t.fields.some((f) => f.type === 'file_image_upload'));
+    if (hasFiles && projectId) {
+      try {
+        const files = await api.listFiles(projectId);
+        files.forEach((f) => { if (f.fullUrl) fileUrls.set(f.id, f.fullUrl); });
+      } catch { /* export without live URLs */ }
+    }
+    const { buildItemDocx } = await import('../lib/export-docx');
+    const blob = await buildItemDocx(item, values, fileUrls, exportDateLabel());
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${item.name || 'content'}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   // Version preview (read-only) + the restore confirmation live here so both the
@@ -207,6 +266,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
 
   const onChange = (fieldId: string, value: unknown) => {
     if (readOnly) return; // read-only status: never persist edits (UI is locked too)
+    noteEditing(fieldId); // heartbeat the soft-lock (throttled) — I'm editing this field
     setValues((prev) => ({ ...prev, [fieldId]: value }));
     pending.current[fieldId] = value;
     setSave('saving');
@@ -282,6 +342,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
 
 
   return (
+    <ItemIdContext.Provider value={item.id}>
     <div className="flex items-start gap-4">
     <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       {/* Tabs */}
@@ -333,6 +394,18 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
             locked={readOnly}
             onChange={(id) => changeStatus.mutate(id)}
           />
+          {item.canClaim && (
+            <button type="button" onClick={() => claim.mutate()} disabled={claim.isPending}
+                    className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50">
+              Claim
+            </button>
+          )}
+          {approval.data?.canSubmit && (
+            <button type="button" onClick={() => setSubmitOpen(true)}
+                    className="rounded-md bg-green-600 px-4 py-1.5 text-[13px] font-semibold uppercase tracking-wide text-white shadow-sm hover:bg-green-700">
+              Submit for review
+            </button>
+          )}
           <div className="inline-flex items-center gap-2">
             <button type="button" onClick={() => saveVersion.mutate()} disabled={saveVersion.isPending || savedFlash}
                     className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-100">
@@ -362,8 +435,9 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
                             className="block w-full px-4 py-2 text-left text-[13px] text-slate-700 hover:bg-slate-50">
                       Export as HTML
                     </button>
-                    <button type="button" disabled title="Coming soon"
-                            className="block w-full cursor-not-allowed px-4 py-2 text-left text-[13px] text-slate-400">
+                    <button type="button"
+                            onClick={() => void exportDocx()}
+                            className="block w-full px-4 py-2 text-left text-[13px] text-slate-700 hover:bg-slate-50">
                       Export as DOCX
                     </button>
                   </div>
@@ -371,15 +445,19 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
               )}
             </div>
           </div>
-          {/* No save-status indicator in a read-only status — nothing can be saved. */}
-          {!readOnly && (
-            <span className="ml-auto text-xs">
-              {save === 'saving' && <span className="text-slate-400">Saving…</span>}
-              {save === 'retrying' && <span className="text-amber-600">Reconnecting…</span>}
-              {save === 'saved' && <span className="text-green-600">Saved</span>}
-              {save === 'error' && <span className="text-red-600">Couldn’t save — your changes are kept locally</span>}
-            </span>
-          )}
+          <div className="ml-auto flex items-center gap-3">
+            {/* Who else is viewing this item right now (live). */}
+            <Viewers peers={peers} />
+            {/* No save-status indicator in a read-only status — nothing can be saved. */}
+            {!readOnly && (
+              <span className="text-xs">
+                {save === 'saving' && <span className="text-slate-400">Saving…</span>}
+                {save === 'retrying' && <span className="text-amber-600">Reconnecting…</span>}
+                {save === 'saved' && <span className="text-green-600">Saved</span>}
+                {save === 'error' && <span className="text-red-600">Couldn’t save — your changes are kept locally</span>}
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -430,19 +508,25 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
               choices: f.choices,
               value: values[f.id],
             };
+            const lockedBy = lockedByField.get(f.id);
             return (
-              <Field
-                key={f.id}
-                field={field}
-                onChange={onChange}
-                activeFieldId={activeFieldId}
-                onActivate={setActiveFieldId}
-                docTitle={item.name}
-                projectId={projectId}
-                onAttachFile={attachFile}
-                highlightKeywords={f.id === mainFieldId ? highlightKeywords : undefined}
-                readOnly={readOnly}
-              />
+              // Soft-lock wrapper: focusing a field broadcasts that I'm editing it
+              // (so others lock it); a field someone else is editing gets an
+              // overlay that blocks interaction + names who has it.
+              <div key={f.id} className="relative">
+                <Field
+                  field={field}
+                  onChange={onChange}
+                  activeFieldId={activeFieldId}
+                  onActivate={setActiveFieldId}
+                  docTitle={item.name}
+                  projectId={projectId}
+                  onAttachFile={attachFile}
+                  highlightKeywords={f.id === mainFieldId ? highlightKeywords : undefined}
+                  readOnly={readOnly || !!lockedBy}
+                />
+                {lockedBy && <FieldLock name={lockedBy} />}
+              </div>
             );
           })
         )}
@@ -493,12 +577,55 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
           </div>
         </div>
       )}
+      {submitOpen && approval.data && (
+        <SubmitModal itemId={item.id} projectId={projectId} approval={approval.data}
+                     onClose={() => setSubmitOpen(false)} onDone={() => { setSubmitOpen(false); onReload(); }} />
+      )}
     </div>
+    </ItemIdContext.Provider>
   );
 }
 
 /** A field rendered read-only (used by the version preview). Content is stored
  *  HTML/rendered value, styled with the shared field-content CSS (DIFF_CSS). */
+/** Overlay shown on a field another user is editing — blocks interaction and
+ *  names who has it (the soft-lock). */
+function FieldLock({ name }: { name: string }) {
+  return (
+    <div className="absolute inset-0 z-20 cursor-not-allowed rounded bg-slate-50/30" aria-label={`${name} is editing`}>
+      <span className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-slate-800/90 px-2.5 py-1 text-[12px] font-medium text-white shadow">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+          <rect x="4" y="11" width="16" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+        </svg>
+        {name} is editing
+      </span>
+    </div>
+  );
+}
+
+/** Live "who's here" avatars — the other people currently viewing this item. */
+function Viewers({ peers }: { peers: Peer[] }) {
+  if (peers.length === 0) return null;
+  return (
+    <div className="flex items-center gap-1.5" title={`${peers.map((p) => p.name).join(', ')} also here`}>
+      <div className="flex -space-x-2">
+        {peers.slice(0, 4).map((p) => (
+          <span key={p.userId} title={p.name}
+                className="grid h-7 w-7 place-items-center rounded-full border-2 border-white text-[11px] font-semibold text-white"
+                style={{ background: avatarColor(p.name) }}>
+            {avatarInitial(p.name)}
+          </span>
+        ))}
+        {peers.length > 4 && (
+          <span className="grid h-7 w-7 place-items-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-semibold text-slate-600">
+            +{peers.length - 4}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ReadOnlyField({ label, html }: { label: string; html: string }) {
   return (
     <section className="rounded border border-slate-200 bg-white">
@@ -560,9 +687,7 @@ function VersionsPanel({
           onBeforeStatusChange={onBeforeStatusChange}
         />
       ) : (
-        <div className="grid place-items-center px-6 py-12 text-center text-[13px] text-slate-400">
-          Comments are coming in a later phase.
-        </div>
+        <CommentsTab item={item} />
       )}
     </aside>
   );

@@ -10,6 +10,60 @@ import { avatarColor, avatarInitial } from '../lib/avatar';
 import { downloadItemHtml } from '../lib/export-html';
 import { toast } from '../lib/toast';
 
+type AvatarSpec = { name: string; dim: boolean };
+type PeopleDisplay =
+  | { kind: 'add' }
+  | { kind: 'avatars'; avatars: AvatarSpec[]; overflow: number; overflowNames: string[] };
+
+/**
+ * The People-column avatars, per EasyContent's rules:
+ *  - The leading avatar is the writer — the first person assigned to the FIRST
+ *    status — dimmed once the item has moved past the first status.
+ *  - The rest are the CURRENT status's assignees.
+ *  - Up to 4 slots. Past the first status the writer takes slot 1 and the
+ *    current-status users fill the rest; with 4+ current users only the first
+ *    two show and a "+N" bubble stands in for the remainder (exactly three fill
+ *    all slots with no bubble). In the first status the writer is just the first
+ *    current assignee at full opacity.
+ *  - Nobody assigned anywhere → the add-people icon.
+ */
+function peopleDisplay(item: ItemSummary): PeopleDisplay {
+  const current = item.people;
+  const author = item.author;
+
+  // Helper for the simple "just show current, 4 slots, 3 + +N over four" case.
+  const fromCurrent = (): PeopleDisplay => {
+    if (current.length === 0) return { kind: 'add' };
+    const cap = current.length > 4 ? 3 : 4;
+    return {
+      kind: 'avatars',
+      avatars: current.slice(0, cap).map((p) => ({ name: p.name, dim: false })),
+      overflow: current.length > 4 ? current.length - 3 : 0,
+      overflowNames: current.slice(3).map((p) => p.name),
+    };
+  };
+
+  // In the first status (or when the first status has no writer), the writer is
+  // simply the first current assignee — no dimmed leading avatar.
+  if (item.in_first_status || !author) {
+    if (!author && current.length === 0) return { kind: 'add' };
+    return fromCurrent();
+  }
+
+  // Past the first status: the writer leads (dimmed), current users follow.
+  const lead: AvatarSpec = { name: author.name, dim: true };
+  if (current.length === 0) return { kind: 'avatars', avatars: [lead], overflow: 0, overflowNames: [] };
+  if (current.length <= 3) {
+    return { kind: 'avatars', avatars: [lead, ...current.map((p) => ({ name: p.name, dim: false }))], overflow: 0, overflowNames: [] };
+  }
+  return {
+    kind: 'avatars',
+    avatars: [lead, { name: current[0]!.name, dim: false }, { name: current[1]!.name, dim: false }],
+    overflow: current.length - 2,
+    overflowNames: current.slice(2).map((p) => p.name),
+  };
+}
+
 /** Column definitions. Title + Status are fixed (always shown, first). */
 type ColKey = 'people' | 'due' | 'template' | 'categories' | 'tags' | 'timeInStatus' | 'lastUpdated';
 const COLUMNS: { key: ColKey; label: string; defaultOn: boolean }[] = [
@@ -443,52 +497,79 @@ function Row({
   const openCats = (e: React.MouseEvent) => { e.stopPropagation(); setCatsOpen(true); };
   const cell = (k: ColKey) => {
     switch (k) {
-      case 'people':
-        // Avatars for who's assigned, plus a dashed add-person button that
-        // appears on row hover (always shown when nobody is assigned).
-        return (
-          <TimelineHover itemId={item.id}>
-            <button type="button" onClick={openAssign} title={item.people.length ? 'Edit assignees' : 'Assign people'}
-                    className="flex items-center gap-1.5">
-              {item.people.length > 0 && (
-                <span className="flex -space-x-2">
-                  {item.people.slice(0, 3).map((p) => (
-                    <span key={p.name} title={p.name}
-                          className="grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[11px] font-semibold text-white"
-                          style={{ background: avatarColor(p.name) }}>{avatarInitial(p.name)}</span>
-                  ))}
-                  {item.people.length > 3 && (
-                    <span title={item.people.slice(3).map((p) => p.name).join(', ')}
-                          className="grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-semibold text-slate-600">
-                      +{item.people.length - 3}
-                    </span>
-                  )}
-                </span>
-              )}
-              <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border border-dashed border-slate-300 text-slate-500 transition hover:border-slate-500 hover:text-slate-700 ${item.people.length ? 'opacity-0 group-hover:opacity-100' : ''}`}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.2" /><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6" /></svg>
+      case 'people': {
+        // Avatars per EasyContent's rules (writer + current-status assignees).
+        // The dashed add-person affordance — and clicking to open the assign
+        // modal — is shown ONLY to users who may assign people; others see the
+        // avatars read-only (and get a Claim button in the Action column).
+        const disp = peopleDisplay(item);
+        const avatars = disp.kind === 'avatars' && (
+          <span className="flex -space-x-2">
+            {disp.avatars.map((a, i) => (
+              <span key={i} title={a.name}
+                    className={`grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[11px] font-semibold text-white ${a.dim ? 'opacity-40' : ''}`}
+                    style={{ background: avatarColor(a.name) }}>{avatarInitial(a.name)}</span>
+            ))}
+            {disp.overflow > 0 && (
+              <span title={disp.overflowNames.join(', ')}
+                    className="grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-semibold text-slate-600">
+                +{disp.overflow}
               </span>
-            </button>
-          </TimelineHover>
+            )}
+          </span>
         );
-      case 'due':
-        // The date if set (click to edit); otherwise a + on hover to set one.
-        // Wrapped in the timeline hover like Status/People, so it shows each
-        // status's due date even when the current one has none.
         return (
           <TimelineHover itemId={item.id}>
-            {item.next_due_date ? (
-              <button type="button" onClick={openAssign} className="text-slate-700 hover:text-blue-600 hover:underline">
-                {new Date(item.next_due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(' ', '-')}
+            {item.can_assign ? (
+              <button type="button" onClick={openAssign} title={disp.kind === 'add' ? 'Assign people' : 'Edit assignees'}
+                      className="flex items-center gap-1.5">
+                {avatars}
+                <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border border-dashed border-slate-300 text-slate-500 transition hover:border-slate-500 hover:text-slate-700 ${disp.kind === 'add' ? '' : 'opacity-0 group-hover:opacity-100'}`}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="9" cy="8" r="3.2" /><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6" /></svg>
+                </span>
               </button>
             ) : (
+              <span className="flex items-center gap-1.5">{avatars}</span>
+            )}
+          </TimelineHover>
+        );
+      }
+      case 'due': {
+        // Timer icon + date — RED when overdue, BLUE when upcoming (per EC).
+        // Editing (change / add) is limited to users who may set due dates;
+        // everyone else sees it read-only. Wrapped in the timeline hover so it
+        // shows each status's due date even when the current one has none.
+        const due = item.next_due_date ? new Date(item.next_due_date) : null;
+        const overdue = due ? due.getTime() < Date.now() : false;
+        const dueColor = overdue ? 'text-red-600' : 'text-blue-600';
+        const label = due
+          ? due.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(' ', '-')
+          : '';
+        const timer = (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="10" x2="14" y1="2" y2="2" /><line x1="12" x2="15" y1="14" y2="11" /><circle cx="12" cy="14" r="8" />
+          </svg>
+        );
+        return (
+          <TimelineHover itemId={item.id}>
+            {due ? (
+              item.can_assign ? (
+                <button type="button" onClick={openAssign} title="Change due date"
+                        className={`inline-flex items-center gap-1.5 font-medium ${dueColor} hover:underline`}>
+                  {timer}{label}
+                </button>
+              ) : (
+                <span className={`inline-flex items-center gap-1.5 font-medium ${dueColor}`}>{timer}{label}</span>
+              )
+            ) : item.can_assign ? (
               <button type="button" onClick={openAssign} title="Set due date"
                       className="grid h-7 w-7 place-items-center rounded-full text-blue-600 opacity-0 transition hover:bg-blue-50 group-hover:opacity-100">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>
               </button>
-            )}
+            ) : null}
           </TimelineHover>
         );
+      }
       case 'template':
         return item.template_name ?? <span className="text-slate-400">—</span>;
       case 'lastUpdated':
@@ -539,7 +620,10 @@ function Row({
       </td>
       {cols.map((k) => <td key={k} className="px-4 py-3 text-slate-700">{cell(k)}</td>)}
       <td className="px-4 py-3">
-        <RowActions projectId={projectId} item={item} />
+        <div className="flex items-center justify-end gap-1.5">
+          {item.can_claim && <ClaimButton projectId={projectId} itemId={item.id} />}
+          <RowActions projectId={projectId} item={item} />
+        </div>
         {assign && <AssignDialog itemId={item.id} itemName={item.name} onClose={() => setAssign(false)} />}
         {catsOpen && (
           <ChangeCategoriesDialog
@@ -660,6 +744,26 @@ function TitleCell({ projectId, item, onOpen }: { projectId: string; item: ItemS
 }
 
 /**
+ * The Claim button (EasyContent "claiming items"). Shown in the Action column
+ * only when the caller may claim the item — self-assigns them to the current
+ * status. The server re-checks the reviewing-role + unassigned gates.
+ */
+function ClaimButton({ projectId, itemId }: { projectId: string; itemId: string }) {
+  const qc = useQueryClient();
+  const claim = useMutation({
+    mutationFn: () => api.claimItem(itemId),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['items', projectId] }); toast('Claimed — assigned to you.'); },
+    onError: () => toast('Could not claim this item.'),
+  });
+  return (
+    <button type="button" onClick={(e) => { e.stopPropagation(); claim.mutate(); }} disabled={claim.isPending}
+            className="rounded border border-slate-300 bg-white px-3 py-1 text-[13px] font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50">
+      Claim
+    </button>
+  );
+}
+
+/**
  * Per-row action menu, mirroring the reference. Only Delete is wired today —
  * RLS enforces manage_content_items. The rest depend on features not yet built
  * (assignment, deadlines, workflow transitions, categories, briefs, export) and
@@ -689,6 +793,22 @@ function RowActions({
       const fileUrls = new Map<string, string>();
       try { (await api.listFiles(projectId)).forEach((f) => { if (f.fullUrl) fileUrls.set(f.id, f.fullUrl); }); } catch { /* export without live URLs */ }
       downloadItemHtml(full, fileUrls);
+    } catch {
+      toast('Could not export the item.');
+    }
+  };
+
+  // Export to DOCX: same data as the HTML export, but the docx builder (which
+  // pulls the heavy `docx` library) is dynamically imported so it never lands in
+  // the main bundle.
+  const exportDocx = async () => {
+    setOpen(false);
+    try {
+      const full = await api.getItem(item.id);
+      const fileUrls = new Map<string, string>();
+      try { (await api.listFiles(projectId)).forEach((f) => { if (f.fullUrl) fileUrls.set(f.id, f.fullUrl); }); } catch { /* export without live URLs */ }
+      const { downloadItemDocx } = await import('../lib/export-docx');
+      await downloadItemDocx(full, fileUrls);
     } catch {
       toast('Could not export the item.');
     }
@@ -726,14 +846,15 @@ function RowActions({
 
       {open && (
         <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl">
-          <MenuItem icon="assign" label="Assign people" onClick={() => { setOpen(false); setAssign(true); }} />
-          <MenuItem icon="calendar" label="Manage due dates" onClick={() => { setOpen(false); setAssign(true); }} />
+          {/* Assigning people / due dates needs manage_people_and_deadlines. */}
+          {item.can_assign && <MenuItem icon="assign" label="Assign people" onClick={() => { setOpen(false); setAssign(true); }} />}
+          {item.can_assign && <MenuItem icon="calendar" label="Manage due dates" onClick={() => { setOpen(false); setAssign(true); }} />}
           <MenuItem icon="status" label="Change status" onClick={() => { setOpen(false); setChangeStatus(true); }} />
           <MenuItem icon="template" label="Change template" disabled />
           <MenuItem icon="folder" label="Change category" onClick={() => { setOpen(false); setCatsOpen(true); }} />
           <MenuItem icon="duplicate" label="Duplicate item" disabled />
           <MenuItem icon="brief" label="Convert to Brief" disabled />
-          <MenuItem icon="cloud" label="Export to DOCX" disabled />
+          <MenuItem icon="cloud" label="Export to DOCX" onClick={exportDocx} />
           <MenuItem icon="cloud" label="Export to HTML" onClick={exportItem} />
           <div className="my-1.5 border-t border-slate-100" />
           <MenuItem icon="trash" label="Delete" danger onClick={() => setConfirm(true)} />

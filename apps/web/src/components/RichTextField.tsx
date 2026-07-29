@@ -108,10 +108,13 @@ export function RichTextField({
   onAttachFile,
   highlightKeywords,
   editable = true,
+  fieldId,
 }: {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
+  /** The field's id — so the selection "comment" action can anchor a text comment. */
+  fieldId?: string;
   /** Whether this field owns the toolbar right now. */
   active: boolean;
   /** Called when the field gains focus, to claim the toolbar. */
@@ -270,9 +273,12 @@ export function RichTextField({
   }, [fullscreen]);
 
   // Reflect the read-only lock: TipTap keeps its own editable flag, so update it
-  // when the prop changes (e.g. the item moves into/out of a read-only status).
+  // when the prop changes (e.g. the item moves into/out of a read-only status, or
+  // a collaboration soft-lock). Pass emitUpdate=false — the default emits a phantom
+  // 'update' event, which fires onChange → a spurious autosave AND (with the soft-
+  // lock) a fake "I'm editing" broadcast, which ping-ponged and locked BOTH windows.
   useEffect(() => {
-    editor?.setEditable(editable);
+    editor?.setEditable(editable, false);
   }, [editor, editable]);
 
   // Push the active highlight keywords into the editor's decoration plugin.
@@ -509,6 +515,7 @@ export function RichTextField({
         onToggleFullscreen={() => setFullscreen((v) => !v)}
         onUpload={uploadForDialog}
         disabled={!editable}
+        fieldId={fieldId}
       />
 
       <div className={`rt-body ${fullscreen ? 'flex-1 overflow-y-auto' : ''}`}>

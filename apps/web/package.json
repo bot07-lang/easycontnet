@@ -33,6 +33,7 @@
     "@tiptap/pm": "^2.11.5",
     "@tiptap/react": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
+    "docx": "^9.7.1",
     "htmldiff-js": "^1.0.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

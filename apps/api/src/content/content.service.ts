@@ -1,7 +1,8 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { DatabaseService } from '../db/database.service.js';
 import type { UserContext } from '../auth/auth.guard.js';
+import { workflowActions } from './workflow-actions.js';
 
 // Postgres error codes we translate into a clean 403 rather than a 500.
 const RLS_VIOLATION = '42501'; // insufficient_privilege (RLS WITH CHECK failed)
@@ -30,6 +31,11 @@ export class ContentService {
                  and exists (select 1 from public.item_status_assignees a
                              where a.item_id = ci.id and a.status_id = ci.current_status_id
                                and a.profile_id = $2)) as mine,
+                -- Responsible people = the CURRENT status's assignees only (matches
+                -- EasyContent: "This column displays the assigned users for a content
+                -- item's current workflow status"). When the current status has none,
+                -- the table shows the add-person icon; people assigned to earlier
+                -- statuses are intentionally not carried forward.
                 coalesce((
                   select jsonb_agg(jsonb_build_object('name', pr.full_name, 'role', ro.name) order by pr.full_name)
                   from public.item_status_assignees a
@@ -37,16 +43,42 @@ export class ContentService {
                   join public.roles ro on ro.id = pr.role_id
                   where a.item_id = ci.id and a.status_id = ci.current_status_id
                 ), '[]'::jsonb) as people,
+                -- The writer/author = first person assigned to the INITIAL status.
+                -- Shown as the leading avatar (dimmed when the item has moved on).
+                (select jsonb_build_object('name', pr.full_name, 'role', ro.name)
+                   from public.item_status_assignees a
+                   join public.workflow_statuses fs
+                     on fs.id = a.status_id and fs.project_id = ci.project_id and fs.is_initial
+                   join public.profiles pr on pr.id = a.profile_id
+                   join public.roles ro on ro.id = pr.role_id
+                  where a.item_id = ci.id
+                  order by pr.full_name
+                  limit 1) as author,
+                coalesce(s.is_initial, false) as in_first_status,
                 -- The current status's due date, or if it has none, the next
                 -- upcoming status (by position) that does — matching the reference.
-                (select a.due_at
-                   from public.item_status_assignees a
-                   join public.workflow_statuses s2 on s2.id = a.status_id
-                  where a.item_id = ci.id and a.due_at is not null
+                (select d.due_at
+                   from public.item_status_due_dates d
+                   join public.workflow_statuses s2 on s2.id = d.status_id
+                  where d.item_id = ci.id and d.due_at is not null
                     and s2.position >= coalesce((select s3.position from public.workflow_statuses s3
                                                   where s3.id = ci.current_status_id), 0)
-                  order by s2.position asc, a.due_at asc
-                  limit 1) as next_due_date
+                  order by s2.position asc, d.due_at asc
+                  limit 1) as next_due_date,
+                -- Whether the caller may assign people (drives the People-column
+                -- add-person affordance — only assigners see it).
+                (select public.app_has_permission('manage_people_and_deadlines')) as can_assign,
+                -- Whether the caller may CLAIM this item: nobody assigned to any
+                -- of its statuses, the caller's role reviews the current status,
+                -- and the caller cannot already assign people themselves.
+                (ci.current_status_id is not null
+                 and not exists (select 1 from public.item_status_assignees a where a.item_id = ci.id)
+                 and exists (
+                   select 1 from public.status_reviewing_roles rr
+                     join public.profiles me on me.id = $2
+                    where rr.status_id = ci.current_status_id and rr.role_id = me.role_id)
+                 and not (select public.app_has_permission('manage_people_and_deadlines'))
+                ) as can_claim
            from public.content_items ci
            left join public.templates t on t.id = ci.template_id
            left join public.workflow_statuses s on s.id = ci.current_status_id
@@ -84,8 +116,27 @@ export class ContentService {
         [item.template_id, itemId],
       );
 
+      // Same claim gates as the list: unassigned + caller's role reviews the
+      // current status + caller can't already assign people.
+      const canClaim = ((
+        await c.query(
+          `select (
+             ci.current_status_id is not null
+             and not exists (select 1 from public.item_status_assignees a where a.item_id = ci.id)
+             and exists (
+               select 1 from public.status_reviewing_roles rr
+                 join public.profiles me on me.id = $2
+                where rr.status_id = ci.current_status_id and rr.role_id = me.role_id)
+             and not (select public.app_has_permission('manage_people_and_deadlines'))
+           ) as can_claim
+             from public.content_items ci where ci.id = $1`,
+          [itemId, user.userId],
+        )
+      ).rows[0]?.can_claim ?? false) as boolean;
+
       return {
         id: item.id,
+        canClaim,
         itemNumber: item.item_number,
         name: item.name,
         templateId: item.template_id ?? null,
@@ -275,6 +326,10 @@ export class ContentService {
           [itemId, statusId],
         );
         if (!rowCount) throw new ForbiddenException('You cannot change this item');
+        // EC: "Manually changing an item's status will clear all reviews." We
+        // also clear the per-assignee completion checkmarks for a clean slate.
+        await c.query(`delete from public.item_reviews where item_id = $1`, [itemId]);
+        await c.query(`delete from public.item_status_completions where item_id = $1`, [itemId]);
         // A status change auto-creates a version, per the reference.
         await this.snapshot(c, user, itemId, 'status_change', null, fromStatus);
         return { ok: true as const };
@@ -282,6 +337,27 @@ export class ContentService {
     } catch (err) {
       const code = (err as { code?: string }).code;
       if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot change this item');
+      throw err;
+    }
+  }
+
+  /**
+   * Claim an item — self-assign to its current status. Available to a user
+   * whose role is a reviewing role for that status when the item has no
+   * assignees anywhere (EasyContent's "claiming items"). The SECURITY DEFINER
+   * function enforces those gates, so a reviewer without manage_people_and_
+   * deadlines (who cannot insert an assignee row under RLS) can still claim.
+   */
+  async claim(user: UserContext, itemId: string) {
+    try {
+      return await this.db.withUser(user, async (c) => {
+        await c.query(`select public.api_claim_content_item($1)`, [itemId]);
+        return { ok: true as const };
+      });
+    } catch (err) {
+      const e = err as { code?: string; message?: string };
+      if (e.code === RLS_VIOLATION || e.code === FK_VIOLATION) throw new ForbiddenException(e.message ?? 'You cannot claim this item');
+      if (e.code === 'P0001') throw new BadRequestException(e.message ?? 'Cannot claim this item');
       throw err;
     }
   }
@@ -297,7 +373,8 @@ export class ContentService {
       const item = (
         await c.query(
           `select ci.project_id, ci.current_status_id,
-                  s.name as status_name, s.color as status_color, s.position as status_position
+                  s.name as status_name, s.color as status_color, s.position as status_position,
+                  coalesce(s.is_initial, false) as is_first
              from public.content_items ci
              left join public.workflow_statuses s on s.id = ci.current_status_id
             where ci.id = $1`,
@@ -324,14 +401,34 @@ export class ContentService {
           ).rows
         : [];
 
-      const canApprove = item.current_status_id
-        ? ((
+      // Current status's assignees + whether each has already completed it —
+      // powers the workflow widget's checkmarks and the action-visibility rules.
+      // EC: "These buttons are only visible to users who are assigned to the
+      // item's current workflow status." So Submit/Approve are ASSIGNMENT-gated.
+      const assignees = item.current_status_id
+        ? (
             await c.query(
-              `select 1 from public.status_reviewing_roles where status_id = $1 and role_id = $2`,
-              [item.current_status_id, user.roleId],
+              `select a.profile_id, pr.full_name as name,
+                      exists (select 1 from public.item_status_completions x
+                               where x.item_id = a.item_id and x.status_id = a.status_id
+                                 and x.profile_id = a.profile_id) as completed
+                 from public.item_status_assignees a
+                 join public.profiles pr on pr.id = a.profile_id
+                where a.item_id = $1 and a.status_id = $2
+                order by pr.full_name`,
+              [itemId, item.current_status_id],
             )
-          ).rowCount ?? 0) > 0
-        : false;
+          ).rows as { profile_id: string; name: string; completed: boolean }[]
+        : [];
+
+      const isAssigned = assignees.some((a) => a.profile_id === user.userId);
+      const othersCompleted = assignees.filter((a) => a.profile_id !== user.userId && a.completed).length;
+      const { canSubmit, canApprove, isLastToComplete } = workflowActions({
+        isFirstStatus: item.is_first as boolean,
+        isAssigned,
+        assigneeCount: assignees.length,
+        othersCompleted,
+      });
 
       const curPos = item.status_position as number | null;
       const next = curPos == null ? null : statuses.find((s) => s.position > curPos) ?? null;
@@ -340,10 +437,14 @@ export class ContentService {
         currentStatus: item.current_status_id
           ? { id: item.current_status_id as string, name: item.status_name as string, color: item.status_color as string }
           : null,
+        isFirstStatus: item.is_first as boolean,
         nextStatusId: (next?.id as string | undefined) ?? null,
         statuses,
         criteria,
+        assignees: assignees.map((a) => ({ id: a.profile_id, name: a.name, completed: a.completed })),
         canApprove,
+        canSubmit,
+        isLastToComplete,
       };
     });
   }
@@ -359,70 +460,55 @@ export class ContentService {
     itemId: string,
     body: { ratings: { ratingId: string; stars: number }[]; note: string | null; nextStatusId: string | null },
   ) {
+    return this.completeStatus(user, itemId, false, body);
+  }
+
+  /**
+   * Submit — complete the FIRST workflow status. Only assigned users may submit;
+   * completing without a target leaves a checkmark by their name, and the last
+   * assignee to submit auto-sends the item forward. Shares the completion path
+   * with approve() via api_complete_status.
+   */
+  async submit(
+    user: UserContext,
+    itemId: string,
+    body: { note: string | null; nextStatusId: string | null },
+  ) {
+    return this.completeStatus(user, itemId, true, { ratings: [], note: body.note, nextStatusId: body.nextStatusId });
+  }
+
+  /**
+   * Shared submit/approve completion. Runs through the SECURITY DEFINER function
+   * api_complete_status, which enforces "assigned to the current status" and can
+   * advance the item even when the caller lacks manage_content_items (which the
+   * item_reviews / content_items RLS would otherwise require).
+   */
+  private async completeStatus(
+    user: UserContext,
+    itemId: string,
+    expectFirst: boolean,
+    body: { ratings: { ratingId: string; stars: number }[]; note: string | null; nextStatusId: string | null },
+  ) {
     try {
       return await this.db.withUser(user, async (c) => {
-        const item = (
-          await c.query(
-            `select ci.org_id, ci.project_id, ci.current_status_id, s.name as status_name
-               from public.content_items ci
-               left join public.workflow_statuses s on s.id = ci.current_status_id
-              where ci.id = $1`,
-            [itemId],
-          )
-        ).rows[0];
-        if (!item) throw new NotFoundException('Item not found');
-
-        const allowed = item.current_status_id
-          ? ((
-              await c.query(
-                `select 1 from public.status_reviewing_roles where status_id = $1 and role_id = $2`,
-                [item.current_status_id, user.roleId],
-              )
-            ).rowCount ?? 0) > 0
-          : false;
-        if (!allowed) throw new ForbiddenException('You are not a reviewer for this status');
-
-        const review = (
-          await c.query(
-            `insert into public.item_reviews
-               (org_id, project_id, item_id, reviewer_id, from_status_id, from_status_name, note)
-             values ($1, $2, $3, $4, $5, $6, $7) returning id`,
-            [item.org_id, item.project_id, itemId, user.userId, item.current_status_id, item.status_name, body.note],
-          )
-        ).rows[0];
-
-        for (const r of body.ratings) {
-          if (!(r.stars >= 1 && r.stars <= 5)) continue;
-          const name = (
-            await c.query(`select name from public.workflow_ratings where id = $1`, [r.ratingId])
-          ).rows[0]?.name as string | undefined;
-          await c.query(
-            `insert into public.item_review_ratings (review_id, rating_id, rating_name, stars)
-             values ($1, $2, $3, $4)`,
-            [review.id, r.ratingId, name ?? 'Rating', r.stars],
-          );
-        }
-
-        // Send forward, if requested (validate the target is in this project).
-        if (body.nextStatusId) {
-          const valid = await c.query(
-            `select 1 from public.content_items ci
-               join public.workflow_statuses s on s.id = $2 and s.project_id = ci.project_id
-              where ci.id = $1`,
-            [itemId, body.nextStatusId],
-          );
-          if (!valid.rowCount) throw new NotFoundException('That status is not in this item’s project');
-          await c.query(
-            `update public.content_items set current_status_id = $2, updated_at = now() where id = $1`,
-            [itemId, body.nextStatusId],
-          );
-          await this.snapshot(c, user, itemId, 'status_change', null, item.status_name);
-        }
-        return { ok: true as const };
+        const { rows } = await c.query(
+          `select public.api_complete_status($1, $2, $3, $4, $5, $6::jsonb) as result`,
+          [
+            itemId,
+            expectFirst,
+            body.note,
+            body.nextStatusId != null,
+            body.nextStatusId,
+            JSON.stringify(body.ratings ?? []),
+          ],
+        );
+        const result = (rows[0]?.result ?? {}) as { advanced?: boolean; isLast?: boolean };
+        return { ok: true as const, advanced: !!result.advanced, isLast: !!result.isLast };
       });
     } catch (err) {
-      const code = (err as { code?: string }).code;
-      if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot approve this item');
+      const e = err as { code?: string; message?: string };
+      if (e.code === RLS_VIOLATION || e.code === FK_VIOLATION) throw new ForbiddenException(e.message ?? 'You cannot complete this item');
+      if (e.code === 'P0001') throw new BadRequestException(e.message ?? 'Cannot complete this item');
       throw err;
     }
   }
@@ -444,11 +530,17 @@ export class ContentService {
         await c.query(
           `select s.id, s.name, s.color, s.position, s.is_initial, s.is_terminal, s.read_only,
                   coalesce((select jsonb_agg(rr.role_id) from public.status_reviewing_roles rr where rr.status_id = s.id), '[]'::jsonb) as reviewing_role_ids,
-                  coalesce((select jsonb_agg(jsonb_build_object('id', pr.id, 'name', pr.full_name) order by pr.full_name)
+                  coalesce((select jsonb_agg(jsonb_build_object(
+                              'id', pr.id, 'name', pr.full_name,
+                              'completed', exists (select 1 from public.item_status_completions x
+                                                    where x.item_id = $1 and x.status_id = s.id and x.profile_id = pr.id),
+                              'note', (select x.note from public.item_status_completions x
+                                        where x.item_id = $1 and x.status_id = s.id and x.profile_id = pr.id)
+                            ) order by pr.full_name)
                             from public.item_status_assignees a join public.profiles pr on pr.id = a.profile_id
                             where a.item_id = $1 and a.status_id = s.id), '[]'::jsonb) as assignees,
-                  (select min(a.due_at) from public.item_status_assignees a
-                    where a.item_id = $1 and a.status_id = s.id) as due_at
+                  (select d.due_at from public.item_status_due_dates d
+                    where d.item_id = $1 and d.status_id = s.id) as due_at
              from public.workflow_statuses s where s.project_id = $2 order by s.position`,
           [itemId, item.project_id],
         )
@@ -470,10 +562,11 @@ export class ContentService {
   }
 
   /**
-   * Replace the item's assignees (and their shared per-status due date) for one
-   * status (manage_people_and_deadlines). The due date lives on the assignee
-   * rows — the same value on each — since that's where the "Due" column and the
-   * overdue counts read it from. RLS enforces permission + project membership.
+   * Replace the item's assignees for one status, and set that status's due date
+   * (manage_people_and_deadlines). The due date lives in item_status_due_dates,
+   * keyed by (item, status) and independent of assignees — so a status can carry
+   * a due date (e.g. an auto-due) even with nobody assigned. RLS enforces the
+   * permission + project membership.
    */
   async setStatusAssignees(user: UserContext, itemId: string, statusId: string, profileIds: string[], dueAt?: string | null) {
     try {
@@ -481,10 +574,17 @@ export class ContentService {
         await c.query(`delete from public.item_status_assignees where item_id = $1 and status_id = $2`, [itemId, statusId]);
         for (const pid of profileIds) {
           await c.query(
-            `insert into public.item_status_assignees (item_id, status_id, profile_id, org_id, due_at) values ($1, $2, $3, $4, $5)`,
-            [itemId, statusId, pid, user.orgId, dueAt ?? null],
+            `insert into public.item_status_assignees (item_id, status_id, profile_id, org_id) values ($1, $2, $3, $4)`,
+            [itemId, statusId, pid, user.orgId],
           );
         }
+        // Upsert the status's due date (null clears it).
+        await c.query(
+          `insert into public.item_status_due_dates (item_id, status_id, org_id, due_at)
+           values ($1, $2, $3, $4)
+           on conflict (item_id, status_id) do update set due_at = excluded.due_at, updated_at = now()`,
+          [itemId, statusId, user.orgId, dueAt ?? null],
+        );
         return { ok: true as const };
       });
     } catch (err) {

@@ -467,17 +467,47 @@ function StatusRow({ status, isCurrent, isComplete, isLast, busy, onSelect }: {
         )}
       </div>
 
+      {/* The status's deadline (one per status, shared by all its members) —
+          shown under the name with a calendar icon, like the hover timeline. */}
+      {status.due_at && (
+        <div className="mt-1.5 flex items-center gap-1.5 text-[13px] text-slate-500">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
+          </svg>
+          <span>{new Date(status.due_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).replace(' ', '-')}</span>
+        </div>
+      )}
+
       {status.assignees.length > 0 && (
         <ul className="mt-2.5 space-y-2">
           {status.assignees.map((a) => (
             <li key={a.id} className="flex items-center gap-2">
+              {/* Green tick once this person has submitted/approved this status. */}
+              {a.completed && (
+                <span className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full bg-green-500" title="Completed">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4"><path d="M20 6 9 17l-5-5" /></svg>
+                </span>
+              )}
               <span
                 className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-full text-[10px] font-semibold text-white"
                 style={{ background: avatarColor(a.name) }}
               >
                 {avatarInitial(a.name)}
               </span>
-              <span className={`truncate text-[13px] ${isCurrent ? 'text-slate-700' : 'text-slate-400'}`}>{a.name}</span>
+              <span className={`truncate text-[13px] ${a.completed || !isCurrent ? 'text-slate-400' : 'text-slate-700'}`}>{a.name}</span>
+              {/* The submitter's note (hover to read), like the reference's clipboard icon. */}
+              {a.completed && (
+                <span className="group relative ml-auto inline-flex shrink-0">
+                  <span className="grid h-7 w-7 place-items-center rounded-full text-slate-700 group-hover:bg-blue-50 group-hover:text-blue-600" aria-label="Submission note">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                      <rect x="8" y="3" width="8" height="4" rx="1" /><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+                    </svg>
+                  </span>
+                  <span className="pointer-events-none absolute bottom-full right-0 z-30 mb-2 hidden max-w-[220px] whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-[13px] leading-snug text-slate-700 shadow-lg group-hover:block">
+                    {a.note?.trim() ? a.note : <span className="italic text-slate-400">No note left</span>}
+                  </span>
+                </span>
+              )}
             </li>
           ))}
         </ul>

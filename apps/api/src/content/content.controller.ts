@@ -117,10 +117,10 @@ export class ContentController {
     return this.content.getApprovalInfo(user, id);
   }
 
-  /** Approve & complete review: record the reviewer's ratings + note, and
-   *  optionally send the item forward. manage_content_items + reviewing role. */
+  /** Approve & complete review on a review status. No permission gate — the DB
+   *  function enforces "assigned to the current status"; assigned reviewers may
+   *  lack manage_content_items. */
   @Post('items/:id/approve')
-  @RequirePermission('manage_content_items')
   approve(
     @CurrentUser() user: UserContext,
     @Param('id') id: string,
@@ -128,6 +128,19 @@ export class ContentController {
   ) {
     return this.content.approve(user, id, {
       ratings: body?.ratings ?? [],
+      note: body?.note ?? null,
+      nextStatusId: body?.nextStatusId ?? null,
+    });
+  }
+
+  /** Submit the first workflow status. Assignment-gated in the DB function. */
+  @Post('items/:id/submit')
+  submit(
+    @CurrentUser() user: UserContext,
+    @Param('id') id: string,
+    @Body() body: { note?: string | null; nextStatusId?: string | null },
+  ) {
+    return this.content.submit(user, id, {
       note: body?.note ?? null,
       nextStatusId: body?.nextStatusId ?? null,
     });
@@ -181,6 +194,13 @@ export class ContentController {
     @Param('versionId') versionId: string,
   ) {
     return this.content.restoreVersion(user, id, versionId);
+  }
+
+  /** Claim (self-assign to the current status). No permission gate here — the
+   *  DB function enforces reviewing-role + unassigned; any member may call it. */
+  @Post('items/:id/claim')
+  claim(@CurrentUser() user: UserContext, @Param('id') id: string) {
+    return this.content.claim(user, id);
   }
 
   /** Data for the assign-people panel: statuses (+reviewing roles +assignees) and members. */
