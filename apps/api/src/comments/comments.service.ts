@@ -36,13 +36,16 @@ export class CommentsService {
         `select cm.id, cm.item_id, cm.anchor, cm.field_id, cm.file_id, cm.text_anchor,
                 cm.parent_id, cm.author_id, pr.full_name as author_name, ro.name as author_role,
                 cm.body, cm.resolved, cm.resolved_by, cm.resolved_at,
-                cm.created_at, cm.updated_at
+                cm.created_at, cm.updated_at,
+                -- May the caller edit / delete / resolve this comment? Own comment
+                -- or the manage_comments permission (mirrors the comments RLS).
+                (cm.author_id = $2 or (select public.app_has_permission('manage_comments'))) as can_manage
            from public.comments cm
            join public.profiles pr on pr.id = cm.author_id
            left join public.roles ro on ro.id = pr.role_id
           where cm.item_id = $1
           order by cm.created_at asc`,
-        [itemId],
+        [itemId, user.userId],
       );
       return rows;
     });

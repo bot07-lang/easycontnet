@@ -34,11 +34,12 @@ begin
   returning id into v_org_id;
 
   ------------------------------------------------------------------
-  -- Admin — every permission. Protected: cannot be edited or deleted,
-  -- so an org can never strip its own administration away.
+  -- Admin — every permission. is_system (cannot be deleted) but EDITABLE, like
+  -- EasyContent: an admin may toggle its permissions (which affects all admins).
+  -- The owner is the safety net — a super-user who can never be locked out.
   ------------------------------------------------------------------
   insert into public.roles (org_id, name, description, position, is_system, is_editable)
-  values (v_org_id, 'Admin', 'Full access to the account.', 1024, true, false)
+  values (v_org_id, 'Admin', 'Full access to the account.', 1024, true, true)
   returning id into v_admin_id;
 
   insert into public.role_permissions (role_id, permission_key)

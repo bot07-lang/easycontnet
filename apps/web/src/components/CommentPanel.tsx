@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ItemComment, type NewComment } from '../lib/api';
-import { useMe } from '../lib/session';
 import { avatarColor, avatarInitial } from '../lib/avatar';
 import { toast } from '../lib/toast';
 
@@ -40,7 +39,6 @@ export function CommentPanel({
    *  field/file comments with their location, e.g. "Author Name [Main Content]"). */
   anchorLabel?: (c: ItemComment) => string | null;
 }) {
-  const me = useMe();
   const qc = useQueryClient();
   const comments = useQuery({
     queryKey: ['comments', itemId],
@@ -104,7 +102,7 @@ export function CommentPanel({
             {visible.map((c) => (
               <li key={c.id}>
                 <Thread comment={c} replies={repliesOf(c.id)} itemId={itemId} members={members}
-                        meId={me?.userId} undoSecs={graced[c.id] ?? 0} newAnchor={newAnchor}
+                        undoSecs={graced[c.id] ?? 0} newAnchor={newAnchor}
                         anchorLabel={anchorLabel}
                         onResolve={(r) => resolve.mutate({ id: c.id, resolved: r })} />
               </li>
@@ -117,13 +115,12 @@ export function CommentPanel({
 }
 
 function Thread({
-  comment, replies, itemId, members, meId, undoSecs, newAnchor, onResolve, anchorLabel,
+  comment, replies, itemId, members, undoSecs, newAnchor, onResolve, anchorLabel,
 }: {
   comment: ItemComment;
   replies: ItemComment[];
   itemId: string;
   members: string[];
-  meId?: string;
   undoSecs: number;
   newAnchor: CommentAnchor;
   onResolve: (resolved: boolean) => void;
@@ -132,7 +129,9 @@ function Thread({
   const [replying, setReplying] = useState(false);
   const resolved = comment.resolved;
 
-  const topAction = resolved ? (
+  // Resolve / unresolve is only offered to those who may edit this comment
+  // (its author or a manage_comments holder) — mirrors the comments RLS.
+  const topAction = !comment.can_manage ? undefined : resolved ? (
     <div className="flex items-center gap-3 text-[13px]">
       {undoSecs > 0 && (
         <button type="button" onClick={() => onResolve(false)} className="font-semibold text-blue-600 hover:underline">Undo ({undoSecs})</button>
@@ -151,11 +150,11 @@ function Thread({
     <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
       {resolved && <div className="border-b border-slate-200 bg-slate-100 py-2 text-center text-[13px] font-semibold text-slate-700">Resolved</div>}
       <div className={`p-3.5 ${resolved ? 'opacity-80' : ''}`}>
-        <CommentBody comment={comment} itemId={itemId} members={members} meId={meId} headerAction={topAction} label={anchorLabel?.(comment) ?? null} />
+        <CommentBody comment={comment} itemId={itemId} members={members} headerAction={topAction} label={anchorLabel?.(comment) ?? null} />
       </div>
       {replies.map((r) => (
         <div key={r.id} className={`border-t border-slate-100 p-3.5 ${resolved ? 'opacity-80' : ''}`}>
-          <CommentBody comment={r} itemId={itemId} members={members} meId={meId} />
+          <CommentBody comment={r} itemId={itemId} members={members} />
         </div>
       ))}
       <div className="flex justify-end border-t border-slate-100 px-3.5 py-2.5">
@@ -174,18 +173,16 @@ function Thread({
 }
 
 function CommentBody({
-  comment, itemId, members, meId, headerAction, label,
+  comment, itemId, members, headerAction, label,
 }: {
   comment: ItemComment;
   itemId: string;
   members: string[];
-  meId?: string;
   headerAction?: React.ReactNode;
   /** "Author Name [Main Content]" — where this comment is anchored (sidebar). */
   label?: string | null;
 }) {
   const qc = useQueryClient();
-  const mine = comment.author_id === meId;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['comments', itemId] });
@@ -210,7 +207,7 @@ function CommentBody({
           {!editing && (
             <div className="flex shrink-0 items-center gap-1">
               {headerAction}
-              {mine && <RowMenu onEdit={() => setEditing(true)} onDelete={() => del.mutate()} />}
+              {comment.can_manage && <RowMenu onEdit={() => setEditing(true)} onDelete={() => del.mutate()} />}
             </div>
           )}
         </div>

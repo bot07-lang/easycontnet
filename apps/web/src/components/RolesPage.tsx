@@ -1,7 +1,34 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type PermissionDef, type Role } from '../lib/api';
 import { toast } from '../lib/toast';
+
+/**
+ * The "?" next to a permission — hovering shows its description. Rendered through
+ * a portal with fixed positioning so the permission matrix's horizontal scroll
+ * container can't clip it (why the plain native title was used before).
+ */
+function InfoTip({ text }: { text: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (r) setPos({ x: r.left, y: r.bottom + 6 });
+  };
+  return (
+    <span ref={ref} onMouseEnter={show} onMouseLeave={() => setPos(null)} className="inline-flex">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="cursor-help text-slate-400 hover:text-slate-600"><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></svg>
+      {pos && createPortal(
+        <div style={{ position: 'fixed', left: Math.max(8, Math.min(pos.x, window.innerWidth - 320)), top: pos.y, zIndex: 60 }}
+             className="w-[300px] rounded-md bg-slate-900 px-3 py-2 text-left text-[12px] font-normal leading-snug text-white shadow-xl">
+          {text}
+        </div>,
+        document.body,
+      )}
+    </span>
+  );
+}
 
 const GROUP_LABELS: Record<string, string> = {
   account: 'Account',
@@ -384,12 +411,9 @@ function PermissionsMatrix({ roles, perms, onChanged }: { roles: Role[]; perms: 
                 {g.items.map((p) => (
                   <tr key={p.key} className="hover:bg-slate-50/60">
                     <td className="sticky left-0 z-10 border-b border-slate-100 bg-white px-3 py-2.5 text-slate-700">
-                      {/* Native title tooltip — the matrix scrolls horizontally, and a
-                          scroll container clips any absolutely-positioned popover, so a
-                          styled tooltip would be cut off. */}
-                      <span className="inline-flex items-center gap-1.5" title={p.description}>
+                      <span className="inline-flex items-center gap-1.5">
                         {p.label}
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="cursor-help text-slate-400"><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></svg>
+                        <InfoTip text={p.description} />
                       </span>
                     </td>
                     {roles.map((r) => {

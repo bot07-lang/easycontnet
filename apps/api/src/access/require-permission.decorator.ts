@@ -33,7 +33,8 @@ class PermissionGuard implements CanActivate {
 
     const req = context.switchToHttp().getRequest<Request>();
     if (!req.user) throw new ForbiddenException('Not authenticated');
-    if (!req.user.permissions.has(required)) {
+    // The account owner is a super-user — they hold every permission implicitly.
+    if (!req.user.isOwner && !req.user.permissions.has(required)) {
       throw new ForbiddenException(`Requires the "${required}" permission`);
     }
     return true;

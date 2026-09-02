@@ -85,7 +85,7 @@ import { EditorToolbar } from './EditorToolbar';
 import { ImageDialog, type ImageValue } from './ImageDialog';
 import { uploadDerivedImage, uploadLibraryFile, type DerivedImage } from '../lib/upload';
 import { rotateImageToBlob } from '../lib/image-edit';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type StoredFile } from '../lib/api';
 import { useItemId } from '../lib/item-context';
 
@@ -361,8 +361,17 @@ export function RichTextField({
   };
 
   // Upload for the Insert/Edit dialog's Upload tab (derived — not added to Files).
+  // An explicit upload from the Insert Image dialog is a real library file, so
+  // it also shows up in the project's Files section (unlike rotated/edited
+  // images, which stay derived-only). Refresh the files cache so it appears
+  // right away in the Files section and the "select an image" picker.
+  const qc = useQueryClient();
   const uploadForDialog = projectId
-    ? (file: File) => uploadDerivedImage(projectId, file, file.name || 'image.png')
+    ? async (file: File) => {
+        const f = await uploadLibraryFile(projectId, file, file.name || 'image.png');
+        void qc.invalidateQueries({ queryKey: ['files', projectId] });
+        return { url: f.url ?? f.fullUrl ?? '', fullUrl: f.fullUrl ?? '' };
+      }
     : undefined;
 
   // Images LINKED to the current content item — offered in the image dialog's

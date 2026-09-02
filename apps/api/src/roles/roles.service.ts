@@ -113,6 +113,21 @@ export class RolesService {
   async setPermission(user: UserContext, id: string, key: string, on: boolean) {
     const role = await this.getRole(user, id);
     if (!role.is_editable) throw new ForbiddenException('This role cannot be edited');
+    // Guardrail: don't let someone remove manage_roles from the LAST role that
+    // has it — that would lock every non-owner admin out of role management.
+    if (!on && key === 'manage_roles') {
+      const others = await this.db.withUser(user, async (c) =>
+        (await c.query(
+          `select count(*)::int as n from public.role_permissions rp
+             join public.roles r on r.id = rp.role_id
+            where r.org_id = $1 and rp.permission_key = 'manage_roles' and rp.role_id <> $2`,
+          [user.orgId, id],
+        )).rows[0].n as number,
+      );
+      if (others === 0) {
+        throw new BadRequestException('You can’t remove “Manage roles” from the last role that has it — this would lock everyone out of role management.');
+      }
+    }
     try {
       await this.db.withUser(user, async (c) => {
         if (on) {

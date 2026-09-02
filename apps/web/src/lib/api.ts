@@ -141,6 +141,8 @@ export interface ItemComment {
   resolved_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Caller may edit / delete / resolve this comment (own or manage_comments). */
+  can_manage: boolean;
 }
 
 export interface NewComment {

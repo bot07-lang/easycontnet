@@ -11,9 +11,10 @@ import type { UserContext } from '../auth/auth.guard.js';
  */
 @Injectable()
 export class PolicyService {
-  /** Does the caller's role grant this permission? */
+  /** Does the caller have this permission? The account owner is a super-user —
+   *  they always pass, so they can never be locked out. */
   can(user: UserContext, permission: string): boolean {
-    return user.permissions.has(permission);
+    return user.isOwner || user.permissions.has(permission);
   }
 
   /** Assert a permission, or throw 403 with a specific message. */
