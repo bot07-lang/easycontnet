@@ -85,6 +85,7 @@ import FontFamily from '@tiptap/extension-font-family';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { FontSize, LineHeight, Div, Indent, GenericEmbed, embedNodeView } from './editor-extensions';
+import { TableOfContents } from './editor-toc';
 import { Figure } from './editor-figure';
 import { TableWithProps, type TableProps } from './editor-table-props';
 import { TablePropsDialog } from './TablePropsDialog';
@@ -198,6 +199,7 @@ export function RichTextField({
       // the iframe (see embedNodeView's doc comment) so it's always removable.
       Youtube.extend({ addNodeView: () => embedNodeView }).configure({ controls: true, nocookie: true }),
       GenericEmbed,
+      TableOfContents,
       KeywordHighlight,
     ],
     content: value,

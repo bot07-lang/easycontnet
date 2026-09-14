@@ -70,6 +70,28 @@
   border-left: 3px solid #9ca3af; padding: .1rem 0 .1rem 1.6rem; margin: 1rem 0;
   color: #6b7280; font-style: italic;
 }
+/* Table of contents block (Insert › Table of contents, editor-toc.ts): a live
+   list of the document's headings, indented by level, each row jumping to
+   that heading on click. */
+.prose-editor .toc-block {
+  margin: 1rem 0; padding: .9rem 1rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; cursor: default;
+}
+.prose-editor .toc-block.ProseMirror-selectednode { outline: 2px solid #4f9bf5; outline-offset: 2px; }
+.prose-editor .toc-title { font-size: .75rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #64748b; margin-bottom: .15rem; }
+.prose-editor .toc-hint { font-size: .78rem; color: #94a3b8; margin-bottom: .65rem; }
+.prose-editor .toc-list { display: flex; flex-direction: column; }
+.prose-editor .toc-row {
+  display: block; width: 100%; text-align: left; background: none; border: none; padding: .2rem 0;
+  font-size: .92rem; color: #2563eb; cursor: pointer; border-radius: 3px;
+}
+.prose-editor .toc-row:hover { text-decoration: underline; }
+.prose-editor .toc-empty-msg { font-size: .85rem; color: #94a3b8; font-style: italic; }
+/* Briefly flash the heading a table-of-contents row jumped to. */
+.prose-editor .toc-flash { animation: cw-toc-flash .9s ease-out; border-radius: 3px; }
+@keyframes cw-toc-flash {
+  0%   { background: #dbeafe; }
+  100% { background: transparent; }
+}
 /* Kill the inner paragraph's margins so they don't collapse out of the quote and
    clip the nested block in show-blocks. */
 .prose-editor blockquote > p { margin: .25rem 0; }

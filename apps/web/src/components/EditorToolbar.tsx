@@ -566,7 +566,8 @@ export function EditorToolbar({
               <MenuItem icon={I.hr} label="Horizontal line"
                 onClick={() => { close(); editor.chain().focus().setHorizontalRule().run(); }} />
               <MenuSep />
-              <MenuItem icon={I.toc} label="Table of contents" disabled />
+              <MenuItem icon={I.toc} label="Table of contents"
+                onClick={() => { close(); editor.chain().focus().insertTableOfContents().run(); }} />
             </>
           )}
         </OverflowMenu>
