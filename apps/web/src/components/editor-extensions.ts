@@ -3,6 +3,23 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import { DOMSerializer } from '@tiptap/pm/model';
 
 /**
+ * Whether a URL is safe to store as a link href or an embed src. Blocks
+ * script-executing schemes (`javascript:`, `data:`, `vbscript:`) — a link or
+ * an iframe embed with one of these would run arbitrary code for whoever
+ * clicks it later (editor, version preview, or export), not just the person
+ * who pasted it in. Relative URLs (no scheme, e.g. `/path`, `#anchor`) are
+ * always safe since the browser can't execute them; an explicit scheme must
+ * be on the allowlist.
+ */
+export function isSafeUrl(url: string): boolean {
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  const schemeMatch = /^([a-z][a-z0-9+.-]*):/i.exec(trimmed);
+  if (!schemeMatch) return true; // relative URL — no scheme to abuse
+  return ['http', 'https', 'mailto', 'tel'].includes(schemeMatch[1]!.toLowerCase());
+}
+
+/**
  * A plain block container, so Format › Formats › Blocks › Div can wrap content
  * in a <div> (TinyMCE offers this; Tiptap has no div node by default).
  */
@@ -385,7 +402,18 @@ export const GenericEmbed = Node.create({
 
   addAttributes() {
     return {
-      src: { default: null },
+      // Guaranteed backstop regardless of entry path (the Embed dialog
+      // already checks the scheme before calling setGenericEmbed, but a
+      // pasted <iframe data-generic-embed src="javascript:..."> would parse
+      // straight into this node otherwise) — an unsafe scheme never reaches
+      // the rendered/stored HTML.
+      src: {
+        default: null,
+        renderHTML: (attributes: Record<string, unknown>) => {
+          const src = attributes.src;
+          return typeof src === 'string' && isSafeUrl(src) ? { src } : {};
+        },
+      },
       width: { default: 640 },
       height: { default: 360 },
     };

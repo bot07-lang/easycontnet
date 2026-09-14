@@ -11,6 +11,7 @@ import { TableMenu } from './TableMenu';
 import { LinkDialog, type LinkValues, type LinkedFile } from './LinkDialog';
 import { toast } from '../lib/toast';
 import { MediaDialog } from './MediaDialog';
+import { isSafeUrl } from './editor-extensions';
 import { SpecialCharDialog } from './SpecialCharDialog';
 import { FindReplaceDialog } from './FindReplaceDialog';
 
@@ -382,7 +383,7 @@ export function EditorToolbar({
     }
     if (!embed) return;
     const src = embed.match(/<iframe[^>]*\ssrc=["']([^"']+)["']/i)?.[1];
-    if (src) {
+    if (src && isSafeUrl(src)) {
       const width = Number(embed.match(/\swidth=["']?(\d+)/i)?.[1]) || 640;
       const height = Number(embed.match(/\sheight=["']?(\d+)/i)?.[1]) || 360;
       editor.commands.setGenericEmbed({ src, width, height });

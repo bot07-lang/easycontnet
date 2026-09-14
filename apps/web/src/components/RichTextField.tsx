@@ -61,12 +61,23 @@ const SizedImage = Image.extend({
 });
 
 // The Link mark carries href/target/rel by default; add `title` so the
-// Insert/Edit Link dialog's Title field round-trips.
+// Insert/Edit Link dialog's Title field round-trips. `href` itself is
+// overridden to refuse to render an unsafe scheme (javascript:, data:, …) —
+// this is the guaranteed backstop regardless of how the href got set
+// (LinkDialog, a pasted <a>, or the Source Code modal): a mark that somehow
+// holds a bad href still can't reach the stored/rendered HTML.
 const TitledLink = Link.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
       title: { default: null },
+      href: {
+        ...(this.parent?.() as Record<string, unknown> | undefined)?.href as object | undefined,
+        renderHTML: (attributes: Record<string, unknown>) => {
+          const href = attributes.href;
+          return typeof href === 'string' && isSafeUrl(href) ? { href } : {};
+        },
+      },
     };
   },
 });
@@ -82,7 +93,7 @@ import Subscript from '@tiptap/extension-subscript';
 import FontFamily from '@tiptap/extension-font-family';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
-import { FontSize, LineHeight, Div, Indent, GenericEmbed, embedNodeView } from './editor-extensions';
+import { FontSize, LineHeight, Div, Indent, GenericEmbed, embedNodeView, isSafeUrl } from './editor-extensions';
 import { TableOfContents } from './editor-toc';
 import { Figure } from './editor-figure';
 import { TableWithProps, type TableProps } from './editor-table-props';

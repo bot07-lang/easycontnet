@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ext, formatSize, timeAgo } from './AddFilesDialog';
+import { isSafeUrl } from './editor-extensions';
 
 export interface LinkValues {
   url: string;
@@ -125,8 +126,14 @@ export function LinkDialog({
   const [title, setTitle] = useState(initial.title);
   const [target, setTarget] = useState(initial.target);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [urlError, setUrlError] = useState(false);
 
-  const save = () => onSave({ url: url.trim(), text, title, target });
+  const save = () => {
+    const trimmed = url.trim();
+    if (!isSafeUrl(trimmed)) { setUrlError(true); return; }
+    setUrlError(false);
+    onSave({ url: trimmed, text, title, target });
+  };
 
   const pickFile = (f: LinkedFile) => {
     setUrl(f.url);
@@ -150,9 +157,11 @@ export function LinkDialog({
               <input
                 autoFocus
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(e) => { setUrl(e.target.value); setUrlError(false); }}
                 onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
-                className="h-11 flex-1 rounded-md border border-slate-300 px-3 text-[15px] text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className={`h-11 flex-1 rounded-md border px-3 text-[15px] text-slate-800 focus:outline-none focus:ring-1 ${
+                  urlError ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : 'border-slate-300 focus:border-blue-500 focus:ring-blue-500'
+                }`}
               />
               <button type="button" onClick={() => setPickerOpen(true)} title="Browse files linked to this item"
                       className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-slate-300 text-slate-600 hover:bg-slate-50">
@@ -161,6 +170,11 @@ export function LinkDialog({
                 </svg>
               </button>
             </div>
+            {urlError && (
+              <p className="mt-1.5 text-[13px] text-red-600">
+                That URL isn’t allowed — links must start with http://, https://, mailto:, or tel:.
+              </p>
+            )}
           </div>
 
           <div>
