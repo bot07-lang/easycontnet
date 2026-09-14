@@ -18,7 +18,6 @@ export function fieldTypeTag(type: string, isPlainText: boolean): string {
     case 'single_line_text': return '[text field]';
     case 'paragraph_text': return isPlainText ? '[text area – plain text]' : '[text area - rich text]';
     case 'file_image_upload': return '[asset]';
-    case 'featured_image': return '[asset]';
     // The featured image stores a URL (text), so EasyContent's export labels it
     // a text field even though its editor control is an image picker.
     case 'single_image': return '[text field]';

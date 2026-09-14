@@ -19,7 +19,6 @@ export type FieldType =
   | 'paragraph_text'
   | 'file_image_upload'
   | 'single_image'
-  | 'featured_image'
   | 'checkboxes'
   | 'radio_buttons'
   | 'dropdown_select'
@@ -248,7 +247,7 @@ export const MOCK_ITEM: ContentItem = {
       fields: [
         {
           id: 'f-featured',
-          type: 'featured_image',
+          type: 'single_image',
           label: 'Featured Image',
           isSystem: true,
           guidelines: 'The main image for the post, shown on listings and social shares.',

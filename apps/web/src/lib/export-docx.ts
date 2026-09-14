@@ -122,7 +122,7 @@ function collectImageUrls(item: ApiItem, values: Values, fileUrls: Map<string, s
         if (src && /^https?:/i.test(src)) urls.add(src);
       });
     }
-    if ((f.type === 'featured_image' || f.type === 'single_image') && v && typeof v === 'object') {
+    if (f.type === 'single_image' && v && typeof v === 'object') {
       const url = (v as { url?: string }).url;
       if (url) urls.add(url);
     }
@@ -285,11 +285,11 @@ function fieldParagraphs(f: ApiField, value: unknown, fileUrls: Map<string, stri
     return out;
   }
 
-  // featured_image / single_image store {url, alt} — embed the image itself
-  // (via the pre-fetched `images` map, same as file_image_upload) instead of
-  // falling to the generic stripHtml(fieldValueToHtml(...)) path below, which
-  // strips the <img> tag down to nothing since it has no text content.
-  if (f.type === 'featured_image' || f.type === 'single_image') {
+  // single_image stores {url, alt} — embed the image itself (via the
+  // pre-fetched `images` map, same as file_image_upload) instead of falling
+  // to the generic stripHtml(fieldValueToHtml(...)) path below, which strips
+  // the <img> tag down to nothing since it has no text content.
+  if (f.type === 'single_image') {
     const v = (value ?? {}) as { url?: string; alt?: string };
     const img = v.url ? images.get(v.url) : undefined;
     if (img) {

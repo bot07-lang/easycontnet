@@ -95,11 +95,6 @@ export function fieldValueToHtml(
       return `<ul>${sel.map((c) => `<li>${escapeHtml(String(c))}</li>`).join('')}</ul>`;
     }
 
-    // Both store the same {url, alt} shape (Field.tsx) — single_image was
-    // missing here, so it always fell through to the default's '' (never
-    // diffed, always exported as empty) even though export-html.ts's
-    // fieldTypeTag already had a case for it.
-    case 'featured_image':
     case 'single_image': {
       const v = (value ?? {}) as { url?: string; alt?: string };
       if (!v.url) return '';

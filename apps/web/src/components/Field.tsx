@@ -445,61 +445,6 @@ export function Field({
     );
   }
 
-  if (field.type === 'featured_image') {
-    const v = (field.value ?? {}) as { url?: string; alt?: string };
-    return (
-      <FieldShell field={field} value={null}>
-        <div className="space-y-3 px-5 py-5">
-          <div className="flex items-start gap-3">
-            <div className="flex-1 space-y-2">
-              <input
-                type="url"
-                value={v.url ?? ''}
-                readOnly={readOnly}
-                onChange={(e) => set({ ...v, url: e.target.value })}
-                placeholder="Image URL"
-                className="w-full rounded border border-slate-300 px-3 py-2 text-[14px] text-slate-800 read-only:bg-slate-50"
-              />
-              <input
-                type="text"
-                value={v.alt ?? ''}
-                readOnly={readOnly}
-                onChange={(e) => set({ ...v, alt: e.target.value })}
-                placeholder="Alt text — describe the image for accessibility"
-                className="w-full rounded border border-slate-300 px-3 py-2 text-[14px] text-slate-800 read-only:bg-slate-50"
-              />
-            </div>
-            <label
-              title="Upload an image"
-              className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded
-                         border border-slate-300 text-slate-500 hover:bg-slate-50"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                   strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                <circle cx="12" cy="13" r="4" />
-              </svg>
-              <input type="file" accept="image/*" className="sr-only" disabled />
-            </label>
-          </div>
-
-          {v.url ? (
-            <img
-              src={v.url}
-              alt={v.alt ?? ''}
-              className="max-h-64 w-full rounded border border-slate-200 object-cover"
-            />
-          ) : (
-            <div className="grid h-40 place-items-center rounded border-2 border-dashed
-                            border-slate-200 text-sm text-slate-400">
-              No image yet
-            </div>
-          )}
-        </div>
-      </FieldShell>
-    );
-  }
-
   if (field.type === 'paragraph_text') {
     // The "Plain text" toggle: a plain field is a textarea, not the rich
     // editor. Meta descriptions, excerpts and the like are plain.
