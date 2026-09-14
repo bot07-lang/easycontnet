@@ -553,6 +553,24 @@ export function RichTextField({
         tippyOptions={{ placement: 'top', zIndex: 40 }}
       >
         <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+          {/* Positions the image within its line by centering/right-aligning
+              the paragraph it sits in (setTextAlign — the same command the
+              toolbar's Alignment dropdown uses). Lives here too, not just in
+              that far-off dropdown, since this is where people actually look
+              right after selecting an image. */}
+          <ImgBtn title="Align left" active={editor.isActive({ textAlign: 'left' })}
+                  onClick={() => editor.chain().focus().setTextAlign('left').run()}>
+            <path d="M3 6h18M3 12h12M3 18h16" />
+          </ImgBtn>
+          <ImgBtn title="Align center" active={editor.isActive({ textAlign: 'center' })}
+                  onClick={() => editor.chain().focus().setTextAlign('center').run()}>
+            <path d="M3 6h18M6 12h12M4 18h16" />
+          </ImgBtn>
+          <ImgBtn title="Align right" active={editor.isActive({ textAlign: 'right' })}
+                  onClick={() => editor.chain().focus().setTextAlign('right').run()}>
+            <path d="M3 6h18M9 12h12M5 18h16" />
+          </ImgBtn>
+          <span className="mx-1 h-6 w-px bg-slate-200" />
           <ImgBtn title="Rotate left" onClick={() => void rotate(-90)} disabled={busy || !projectId}>
             <path d="M3 8a9 9 0 1 0 3-6.7L3 4" /><path d="M3 1v3h3" />
           </ImgBtn>
@@ -697,11 +715,12 @@ export function RichTextField({
 
 /** A small square button used in the image bubble toolbar. */
 function ImgBtn({
-  title, onClick, disabled, children,
+  title, onClick, disabled, active, children,
 }: {
   title: string;
   onClick: () => void;
   disabled?: boolean;
+  active?: boolean;
   children: React.ReactNode;
 }) {
   // Real hover state, not CSS `group-hover` — these buttons sit only ~8px
@@ -724,7 +743,8 @@ function ImgBtn({
         onMouseDown={(e) => e.preventDefault()}
         onClick={onClick}
         disabled={disabled}
-        className="grid h-8 w-8 place-items-center rounded text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+        aria-pressed={active}
+        className={`grid h-8 w-8 place-items-center rounded text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 ${active ? 'bg-slate-200' : ''}`}
       >
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           {children}
