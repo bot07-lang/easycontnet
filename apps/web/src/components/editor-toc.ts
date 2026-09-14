@@ -61,7 +61,7 @@ export const TableOfContents = Node.create({
   renderHTML({ node }) {
     const items = (node.attrs.items ?? []) as TocItem[];
     const rows = items.length
-      ? items.map((it) => ['p', { class: 'toc-row', style: `margin-left:${(it.level - 1) * 16}px` }, it.text || '(untitled heading)'])
+      ? items.map((it) => ['p', { class: 'toc-row' }, it.text || '(untitled heading)'])
       : [['p', { class: 'toc-empty-msg' }, 'Add headings to populate this list.']];
     return [
       'div',
@@ -135,7 +135,6 @@ export const TableOfContents = Node.create({
           const row = document.createElement('button');
           row.type = 'button';
           row.className = 'toc-row';
-          row.style.marginLeft = `${(it.level - 1) * 16}px`;
           row.textContent = it.text || '(untitled heading)';
           row.addEventListener('mousedown', (e) => e.preventDefault());
           row.addEventListener('click', (e) => { e.preventDefault(); jumpTo(i); });
