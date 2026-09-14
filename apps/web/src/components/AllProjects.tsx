@@ -123,8 +123,6 @@ function ProjectsSection({
     <section className="rounded-lg border border-slate-200 bg-white p-5">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-900">Projects</h2>
-        <a href="#" className="text-sm text-blue-600 hover:underline"
-           onClick={(e) => e.preventDefault()}>Learn more about Projects</a>
       </div>
 
       {/* Toolbar */}
