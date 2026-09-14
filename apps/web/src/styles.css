@@ -82,7 +82,7 @@
 .prose-editor .toc-list { display: flex; flex-direction: column; }
 .prose-editor .toc-row {
   display: block; width: 100%; text-align: left; background: none; border: none; padding: .2rem 0;
-  font-size: .92rem; color: #2563eb; cursor: pointer; border-radius: 3px;
+  font-size: .92rem; line-height: 1.4; color: #2563eb; cursor: pointer; border-radius: 3px;
 }
 .prose-editor .toc-row:hover { text-decoration: underline; }
 .prose-editor .toc-empty-msg { font-size: .85rem; color: #94a3b8; font-style: italic; }
