@@ -25,11 +25,23 @@ function FieldShell({
   /** Optional control shown at the header's right edge (e.g. the featured-image picker button). */
   headerAction?: React.ReactNode;
 }) {
+  // Collapsed fields show only the header row — body (input + guidelines)
+  // hidden — matching the reference: every field type gets this, not just
+  // rich-text ones, so it lives here in the one shell every field renders through.
+  const [collapsed, setCollapsed] = useState(false);
   return (
-    <section className="group relative rounded border border-slate-200 bg-white">
-      <header className="flex items-center justify-between gap-4 border-b border-slate-200
-                         bg-slate-50/70 px-5 py-3">
+    <section className="group relative rounded-lg border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.03)]">
+      <header className="flex items-center justify-between gap-4 border-b border-slate-100
+                         bg-slate-50/50 px-5 py-3">
         <h3 className="flex items-center gap-2.5 text-[15px] font-semibold text-slate-900">
+          <button type="button" onClick={() => setCollapsed((v) => !v)}
+                  title={collapsed ? 'Expand field' : 'Collapse field'}
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded text-slate-500 hover:bg-slate-200 hover:text-slate-700">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                 className={collapsed ? 'rotate-180' : ''}>
+              <path d="m18 15-6-6-6 6" />
+            </svg>
+          </button>
           {field.label}
           {/* Comment count badge — appears next to the field title once the field
               has comments; clicking it opens that field's comment thread. */}
@@ -53,12 +65,16 @@ function FieldShell({
         )}
       </header>
 
-      {children}
+      {!collapsed && (
+        <>
+          {children}
 
-      {field.guidelines && (
-        <p className="border-t border-slate-100 bg-slate-50/50 px-5 py-3 text-[13px] text-slate-500">
-          {field.guidelines}
-        </p>
+          {field.guidelines && (
+            <p className="px-5 pb-3.5 pt-2.5 text-[13px] leading-relaxed text-slate-400">
+              {field.guidelines}
+            </p>
+          )}
+        </>
       )}
 
       {/* Round comment affordance floating in the right gutter — appears only on
@@ -114,7 +130,15 @@ function FilesField({
     if (url) downloadFile(url, name);
   };
 
-  const downloadAll = () => value.forEach((f) => download(f.name, byId.get(f.id)?.fullUrl));
+  // Browsers treat several downloads triggered back-to-back in the same tick
+  // as popup-spam and silently drop all but the first, so each one needs its
+  // own turn of the event loop — a plain forEach only ever got one through.
+  const downloadAll = () => {
+    value.forEach((f, i) => {
+      const url = byId.get(f.id)?.fullUrl;
+      if (url) setTimeout(() => downloadFile(url, f.name), i * 300);
+    });
+  };
 
   return (
     <div className="px-5 py-5">

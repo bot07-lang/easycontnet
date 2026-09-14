@@ -38,15 +38,27 @@ const CONFIG: { key: NavKey; label: string; icon: React.ReactNode }[] = [
   { key: 'categories', label: 'Categories', icon: <IconTag /> },
 ];
 
+/** Nav items gated behind a specific permission (owner always passes). Any
+ *  project member can still attach/manage files while editing content — this
+ *  only hides the standalone library-management page for roles that
+ *  shouldn't reach it, mirroring `manage_asset_library`'s intent. */
+const NAV_PERMISSION: Partial<Record<NavKey, string>> = {
+  files: 'manage_asset_library',
+};
+
 export function Sidebar({
   selectedProjectId,
   activeNav,
+  me,
   onAllProjects,
   onSelectProject,
   onNavigate,
 }: {
   selectedProjectId: string | null;
   activeNav: NavKey | null;
+  /** The signed-in caller's permissions, from `api.me()`. Undefined while
+   *  loading — nav items stay visible until it resolves. */
+  me?: { isOwner: boolean; permissions: string[] };
   onAllProjects: () => void;
   onSelectProject: (id: string) => void;
   onNavigate: (key: NavKey) => void;
@@ -54,6 +66,14 @@ export function Sidebar({
   const [collapsed, setCollapsed] = useState(false);
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
   const current = projects.data?.find((p) => p.id === selectedProjectId);
+
+  const allowed = (key: NavKey) => {
+    const perm = NAV_PERMISSION[key];
+    if (!perm || !me) return true;
+    return me.isOwner || me.permissions.includes(perm);
+  };
+  const mainItems = MAIN.filter((item) => allowed(item.key));
+  const configItems = CONFIG.filter((item) => allowed(item.key));
 
   if (collapsed) {
     return (
@@ -94,7 +114,7 @@ export function Sidebar({
 
       {/* Project-scoped nav */}
       <nav className={`flex-1 overflow-y-auto px-2 ${selectedProjectId ? '' : 'pointer-events-none opacity-40'} `.trim()}>
-        {MAIN.map((item) => (
+        {mainItems.map((item) => (
           <NavItem key={item.key} item={item} active={activeNav === item.key}
                    onClick={() => onNavigate(item.key)} />
         ))}
@@ -102,7 +122,7 @@ export function Sidebar({
         <p className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
           Configuration
         </p>
-        {CONFIG.map((item) => (
+        {configItems.map((item) => (
           <NavItem key={item.key} item={item} active={activeNav === item.key}
                    onClick={() => onNavigate(item.key)} />
         ))}

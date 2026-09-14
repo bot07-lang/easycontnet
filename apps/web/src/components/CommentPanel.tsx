@@ -184,7 +184,13 @@ function CommentBody({
 }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
+  // NOT seeded from comment.body here — this component can stay mounted for a
+  // long time (the comment panel doesn't remount on a comment update/refetch),
+  // so a mount-time snapshot goes stale the moment someone else edits this
+  // comment before the "Edit" button is clicked. Seeded fresh in startEdit
+  // instead, right when editing actually begins.
   const [draft, setDraft] = useState(comment.body);
+  const startEdit = () => { setDraft(comment.body); setEditing(true); };
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['comments', itemId] });
 
   const save = useMutation({
@@ -207,7 +213,7 @@ function CommentBody({
           {!editing && (
             <div className="flex shrink-0 items-center gap-1">
               {headerAction}
-              {comment.can_manage && <RowMenu onEdit={() => setEditing(true)} onDelete={() => del.mutate()} />}
+              {comment.can_manage && <RowMenu onEdit={startEdit} onDelete={() => del.mutate()} />}
             </div>
           )}
         </div>

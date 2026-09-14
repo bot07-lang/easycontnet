@@ -2,12 +2,14 @@ import type { Editor } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react';
 import { getMarkRange } from '@tiptap/core';
 import { useEffect, useId, useReducer, useRef, useState } from 'react';
-import { BlockTypeMenu, ColorPalette } from './toolbar-parts';
+import { BlockTypeMenu, useClickAway } from './toolbar-parts';
+import { useOverflowsRight } from '../lib/overflow';
 import { ImageDialog, type ImageValue, type LinkedImage } from './ImageDialog';
-import { TextCommentButton } from './CommentPopover';
-import { ColorPickerDialog } from './ColorPickerDialog';
+import { TextCommentButton, CommentPopoverTrigger } from './CommentPopover';
+import { TextHighlightColorPicker } from './TextHighlightColorPicker';
 import { TableMenu } from './TableMenu';
-import { LinkDialog, type LinkValues } from './LinkDialog';
+import { LinkDialog, type LinkValues, type LinkedFile } from './LinkDialog';
+import { toast } from '../lib/toast';
 import { MediaDialog } from './MediaDialog';
 import { SpecialCharDialog } from './SpecialCharDialog';
 import { FindReplaceDialog } from './FindReplaceDialog';
@@ -20,8 +22,6 @@ import { FindReplaceDialog } from './FindReplaceDialog';
  * active marks never highlight. Tiptap's editor is mutable, so React sees no
  * prop change; we subscribe to transactions and force the update ourselves.
  */
-
-const MENUS = ['File', 'Edit', 'View', 'Insert', 'Format', 'Tools', 'Table'];
 
 function Btn({
   onClick, active, disabled, title, children, wide,
@@ -136,10 +136,13 @@ const I = {
   colorA: <path d="M11 3 5.5 17h2.25l1.12-3h6.25l1.13 3h2.25L13 3h-2zm-1.38 9L12 5.67 14.38 12H9.62z" />,
   highlighter: <path d="M15.6 3.4 8.5 10.5l-1.4 4.2 4.2-1.4 7.1-7.1-2.8-2.8z" />,
   deleteTable: <path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm3.9 2.5L12 10.6l3.1-3.1 1.4 1.4L13.4 12l3.1 3.1-1.4 1.4L12 13.4l-3.1 3.1-1.4-1.4L10.6 12 7.5 8.9l1.4-1.4z" />,
+  dots: <path d="M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" />,
+  taskList: <path d="M3.3 5.7 5 7.4 8.7 3.7l-1-1L5 5.4l-.7-.7-1 1zM10 5h11v2H10V5zM3.3 11.7 5 13.4l3.7-3.7-1-1L5 11.4l-.7-.7-1 1zM10 11h11v2H10v-2zM3 17h4v2H3v-2zM10 17h11v2H10v-2z" />,
+  track: <path d="M4 6h9v2H4V6zm0 5h6v2H4v-2zm0 5h5v2H4v-2zM20.7 5.3a1 1 0 0 0-1.4 0l-1 1 2.4 2.4 1-1a1 1 0 0 0 0-1.4l-1-1zM19.6 9.4 17.2 7l-6.3 6.3-.7 2.9 2.9-.7 6.5-6.1z" />,
 };
 
 export function EditorToolbar({
-  editor, docTitle, fullscreen, onToggleFullscreen, onUpload, linkedImages, disabled = false, fieldId,
+  editor, docTitle, fullscreen, onToggleFullscreen, onUpload, linkedImages, linkedFiles, disabled = false, fieldId,
 }: {
   editor: Editor;
   docTitle?: string;
@@ -149,6 +152,8 @@ export function EditorToolbar({
   onUpload?: (file: File) => Promise<{ url: string; fullUrl: string }>;
   /** Images attached to the current item — pickable in the image dialog. */
   linkedImages?: LinkedImage[];
+  /** Files attached to the current item — pickable in the link dialog's Browse. */
+  linkedFiles?: LinkedFile[];
   /** Read-only status: keep the toolbar mounted but greyed + non-interactive
    *  (rather than unmounting it, which churns the DOM next to the portaled
    *  BubbleMenus and can crash React reconciliation). */
@@ -157,7 +162,6 @@ export function EditorToolbar({
   fieldId?: string;
 }) {
   const [, forceRender] = useReducer((n: number) => n + 1, 0);
-  const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [imageOpen, setImageOpen] = useState(false);
   const [preview, setPreview] = useState(false);
   const [confirmNew, setConfirmNew] = useState(false);
@@ -167,12 +171,10 @@ export function EditorToolbar({
   const [findOpen, setFindOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkInit, setLinkInit] = useState<LinkValues>({ url: '', text: '', title: '', target: '' });
-  const [insertSub, setInsertSub] = useState<'table' | null>(null);
   const bubbleKey = useId(); // unique BubbleMenu plugin key for the selection menu
   // View › Visual aids defaults on (table guides visible); Show blocks off.
   const [visualAids, setVisualAids] = useState(true);
   const [showBlocks, setShowBlocks] = useState(false);
-  const menuBarRef = useRef<HTMLDivElement>(null);
 
   // Without this the toolbar never updates: the editor mutates in place, so
   // React sees no changed prop and button states stay frozen.
@@ -185,19 +187,6 @@ export function EditorToolbar({
       editor.off('selectionUpdate', update);
     };
   }, [editor]);
-
-  // Close an open menu on an outside click. Also drop any open Insert submenu.
-  useEffect(() => {
-    if (!openMenu) return;
-    const close = (e: MouseEvent) => {
-      if (menuBarRef.current && !menuBarRef.current.contains(e.target as Node)) {
-        setOpenMenu(null);
-        setInsertSub(null);
-      }
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [openMenu]);
 
   // View › Visual aids / Show blocks are CSS overlays — reflect their state as
   // classes on the editor's DOM node (which carries the .prose-editor class).
@@ -226,8 +215,6 @@ export function EditorToolbar({
     // openLink/toggleFullscreen are stable closures over `editor`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
-
-  const close = () => { setOpenMenu(null); setInsertSub(null); };
 
   // File > New document — clears the field (confirmed, since it's destructive).
   const newDocument = () => { editor.commands.clearContent(true); setConfirmNew(false); };
@@ -296,13 +283,6 @@ export function EditorToolbar({
     editor.chain().focus().unsetAllMarks().clearNodes().unsetTextAlign().unsetLineHeight().unsetFontSize().run();
   };
 
-  // Custom-colour picker — our own modal dialog (ColorPickerDialog), not the
-  // browser/OS colour popup, so it can't be dismissed by the hover colour menu
-  // closing. openCustomColor closes the menu and remembers which command applies
-  // the chosen colour.
-  const [colorPicker, setColorPicker] = useState<{ apply: (c: string) => void } | null>(null);
-  const openCustomColor = (apply: (c: string) => void) => { close(); setColorPicker({ apply }); };
-
   // Edit menu clipboard actions. Cut/Copy work off the current DOM selection;
   // Paste reads the clipboard (a user gesture, so the browser allows it).
   const cut = () => { document.execCommand('cut'); };
@@ -351,12 +331,33 @@ export function EditorToolbar({
     }
   };
 
-  // Insert/Edit Media — a source URL goes through the YouTube embed; raw embed
-  // code is inserted as-is.
+  // Insert/Edit Media — a source URL goes through the YouTube embed. Raw embed
+  // code has no matching node in the schema (ProseMirror would just silently
+  // drop it, which was the bug), so pull the src out of its <iframe> — the
+  // shape every oEmbed "copy this embed code" snippet (Vimeo, CodePen, etc)
+  // actually uses — and insert THAT via the genericEmbed node. A script-tag
+  // embed (Twitter/X, Instagram) has no iframe to extract and isn't supported
+  // — running arbitrary third-party JS inside the editor would be a real
+  // injection risk — so that case gets a clear message instead of the old
+  // silent no-op.
   const applyMedia = ({ source, embed }: { source: string; embed: string }) => {
     setMediaOpen(false);
-    if (source) editor.commands.setYoutubeVideo({ src: source, width: 640, height: 360 });
-    else if (embed) editor.chain().focus().insertContent(embed).run();
+    if (source) {
+      const inserted = editor.commands.setYoutubeVideo({ src: source, width: 640, height: 360 });
+      if (!inserted) {
+        toast("That link isn't supported — only YouTube video URLs work in the Source field.");
+      }
+      return;
+    }
+    if (!embed) return;
+    const src = embed.match(/<iframe[^>]*\ssrc=["']([^"']+)["']/i)?.[1];
+    if (src) {
+      const width = Number(embed.match(/\swidth=["']?(\d+)/i)?.[1]) || 640;
+      const height = Number(embed.match(/\sheight=["']?(\d+)/i)?.[1]) || 360;
+      editor.commands.setGenericEmbed({ src, width, height });
+    } else {
+      toast("That embed code isn't supported — paste one that includes an <iframe>, like Vimeo's or CodePen's embed snippet.");
+    }
   };
 
   const insertImage = (v: ImageValue) => {
@@ -382,8 +383,7 @@ export function EditorToolbar({
   };
 
   const textColor = (editor.getAttributes('textStyle').color as string) ?? undefined;
-  const highlight = (editor.getAttributes('highlight').color as string) ?? undefined;
-  const inTable = editor.isActive('table');
+  const highlightColor = (editor.getAttributes('highlight').color as string) ?? undefined;
 
   return (
     <div className={`border-b border-slate-200 bg-slate-50 ${disabled ? 'pointer-events-none select-none opacity-50' : ''}`}
@@ -462,246 +462,9 @@ export function EditorToolbar({
         </div>
       </BubbleMenu>
 
-      {/* Menu bar */}
-      <div ref={menuBarRef} className="flex items-center gap-1 border-b border-slate-200 px-2 py-1.5">
-        {MENUS.map((m) => (
-          <div key={m} className="relative">
-            <button
-              type="button"
-              onClick={() => setOpenMenu(openMenu === m ? null : m)}
-              className={`rounded px-2.5 py-1 text-sm text-slate-700 transition hover:bg-slate-200 ${
-                openMenu === m ? 'bg-slate-200' : ''
-              }`}
-            >
-              {m}
-            </button>
-            {m === 'File' && openMenu === 'File' && (
-              <Dropdown width="w-52">
-                <MenuItem icon={I.newDoc} label="New document"
-                  onClick={() => { setOpenMenu(null); setConfirmNew(true); }} />
-                <MenuItem icon={I.eye} label="Preview"
-                  onClick={() => { setOpenMenu(null); setPreview(true); }} />
-                <MenuItem icon={I.print} label="Print…"
-                  onClick={() => { setOpenMenu(null); printContent(); }} />
-              </Dropdown>
-            )}
-            {m === 'Edit' && openMenu === 'Edit' && (
-              <Dropdown width="w-60">
-                <MenuItem icon={I.undo} label="Undo" shortcut="⌘Z" disabled={!editor.can().undo()}
-                  onClick={() => { close(); editor.chain().focus().undo().run(); }} />
-                <MenuItem icon={I.redo} label="Redo" shortcut="⌘Y" disabled={!editor.can().redo()}
-                  onClick={() => { close(); editor.chain().focus().redo().run(); }} />
-                <MenuSep />
-                <MenuItem icon={I.cut} label="Cut" shortcut="⌘X" onClick={() => { close(); cut(); }} />
-                <MenuItem icon={I.copy} label="Copy" shortcut="⌘C" onClick={() => { close(); copy(); }} />
-                <MenuItem icon={I.paste} label="Paste" shortcut="⌘V" onClick={() => { close(); paste(); }} />
-                <MenuItem icon={I.paste} label="Paste as text" onClick={() => { close(); pasteAsText(); }} />
-                <MenuSep />
-                <MenuItem icon={I.selectAll} label="Select all" shortcut="⌘A"
-                  onClick={() => { close(); editor.chain().focus().selectAll().run(); }} />
-                <MenuSep />
-                <MenuItem icon={I.search} label="Find and replace…" shortcut="⌘F"
-                  onClick={() => { close(); setFindOpen(true); }} />
-              </Dropdown>
-            )}
-            {m === 'View' && openMenu === 'View' && (
-              <Dropdown width="w-56">
-                <MenuItem icon={I.code} label="Source code"
-                  onClick={() => { setOpenMenu(null); setSourceOpen(true); }} />
-                <MenuSep />
-                {/* Toggles keep the menu open so the check visibly flips. */}
-                <MenuItem label="Visual aids" check={visualAids}
-                  onClick={() => setVisualAids((v) => !v)} />
-                <MenuItem icon={I.pilcrow} label="Show blocks" check={showBlocks}
-                  onClick={() => setShowBlocks((v) => !v)} />
-                <MenuSep />
-                <MenuItem icon={I.eye} label="Preview"
-                  onClick={() => { setOpenMenu(null); setPreview(true); }} />
-                <MenuItem icon={I.fullscreen} label="Fullscreen" shortcut="⌘⇧F"
-                  onClick={() => { setOpenMenu(null); toggleFullscreen(); }} />
-              </Dropdown>
-            )}
-            {m === 'Insert' && openMenu === 'Insert' && (
-              <Dropdown width="w-60">
-                <MenuItem icon={I.image} label="Image…" onMouseEnter={() => setInsertSub(null)}
-                  onClick={() => { setOpenMenu(null); setImageOpen(true); }} />
-                <MenuItem icon={I.link} label="Link…" shortcut="⌘K" onMouseEnter={() => setInsertSub(null)}
-                  onClick={() => { setOpenMenu(null); openLink(); }} />
-                <MenuItem icon={I.media} label="Media…" onMouseEnter={() => setInsertSub(null)}
-                  onClick={() => { setOpenMenu(null); setMediaOpen(true); }} />
-                <MenuItem icon={I.table} label="Table" chevron onMouseEnter={() => setInsertSub('table')}>
-                  {insertSub === 'table' && (
-                    <div className="absolute left-full top-0 z-40 -ml-1 rounded-md border border-slate-200 bg-white p-2 shadow-xl">
-                      <TableGrid onPick={(r, c) => {
-                        editor.chain().focus().insertTable({ rows: r, cols: c, withHeaderRow: true }).run();
-                        setOpenMenu(null); setInsertSub(null);
-                      }} />
-                    </div>
-                  )}
-                </MenuItem>
-                <MenuSep />
-                <MenuItem icon={I.omega} label="Special character…" onMouseEnter={() => setInsertSub(null)}
-                  onClick={() => { setOpenMenu(null); setSpecialOpen(true); }} />
-                <MenuItem icon={I.hr} label="Horizontal line" onMouseEnter={() => setInsertSub(null)}
-                  onClick={() => { setOpenMenu(null); editor.chain().focus().setHorizontalRule().run(); }} />
-                <MenuSep />
-                <MenuItem icon={I.toc} label="Table of contents" disabled />
-              </Dropdown>
-            )}
-            {m === 'Format' && openMenu === 'Format' && (
-              <Dropdown width="w-60">
-                <MenuItem glyph={<b className="text-[15px]">B</b>} label="Bold" shortcut="⌘B" active={editor.isActive('bold')}
-                  onClick={() => { close(); editor.chain().focus().toggleBold().run(); }} />
-                <MenuItem glyph={<i className="font-serif text-[15px]">I</i>} label="Italic" shortcut="⌘I" active={editor.isActive('italic')}
-                  onClick={() => { close(); editor.chain().focus().toggleItalic().run(); }} />
-                <MenuItem glyph={<span className="text-[15px] underline">U</span>} label="Underline" shortcut="⌘U" active={editor.isActive('underline')}
-                  onClick={() => { close(); editor.chain().focus().toggleUnderline().run(); }} />
-                <MenuItem glyph={<span className="text-[15px] line-through">S</span>} label="Strikethrough" active={editor.isActive('strike')}
-                  onClick={() => { close(); editor.chain().focus().toggleStrike().run(); }} />
-                <MenuItem glyph={<span className="text-[13px] font-semibold">x²</span>} label="Superscript" active={editor.isActive('superscript')}
-                  onClick={() => { close(); editor.chain().focus().toggleSuperscript().run(); }} />
-                <MenuItem glyph={<span className="text-[13px] font-semibold">x₂</span>} label="Subscript" active={editor.isActive('subscript')}
-                  onClick={() => { close(); editor.chain().focus().toggleSubscript().run(); }} />
-                <MenuItem icon={I.code} label="Code" active={editor.isActive('code')}
-                  onClick={() => { close(); editor.chain().focus().toggleCode().run(); }} />
-                <MenuSep />
-
-                <Sub label="Formats" width="w-44" scroll={false}>
-                  <Sub label="Headings" width="w-44">
-                    {([1, 2, 3, 4, 5, 6] as const).map((lvl) => (
-                      <MenuItem key={lvl}
-                        label={<span style={{ fontSize: `${1.6 - (lvl - 1) * 0.12}em`, fontWeight: 600 }}>{`Heading ${lvl}`}</span>}
-                        active={editor.isActive('heading', { level: lvl })}
-                        onClick={() => { close(); editor.chain().focus().toggleHeading({ level: lvl }).run(); }} />
-                    ))}
-                  </Sub>
-                  <Sub label="Inline" width="w-44">
-                    <MenuItem label={<span className="font-bold">Bold</span>} active={editor.isActive('bold')} onClick={() => { close(); editor.chain().focus().toggleBold().run(); }} />
-                    <MenuItem label={<span className="italic">Italic</span>} active={editor.isActive('italic')} onClick={() => { close(); editor.chain().focus().toggleItalic().run(); }} />
-                    <MenuItem label={<span className="underline">Underline</span>} active={editor.isActive('underline')} onClick={() => { close(); editor.chain().focus().toggleUnderline().run(); }} />
-                    <MenuItem label={<span className="line-through">Strikethrough</span>} active={editor.isActive('strike')} onClick={() => { close(); editor.chain().focus().toggleStrike().run(); }} />
-                    <MenuItem label="Superscript" active={editor.isActive('superscript')} onClick={() => { close(); editor.chain().focus().toggleSuperscript().run(); }} />
-                    <MenuItem label="Subscript" active={editor.isActive('subscript')} onClick={() => { close(); editor.chain().focus().toggleSubscript().run(); }} />
-                    <MenuItem label={<span className="rounded bg-red-50 px-1.5 font-mono text-red-600">Code</span>} active={editor.isActive('code')} onClick={() => { close(); editor.chain().focus().toggleCode().run(); }} />
-                  </Sub>
-                  <Sub label="Blocks" width="w-44">
-                    <MenuItem label="Paragraph" check={editor.isActive('paragraph')} onClick={() => { close(); editor.chain().focus().setParagraph().run(); }} />
-                    <MenuItem label={<span className="italic">Blockquote</span>} check={editor.isActive('blockquote')} onClick={() => { close(); editor.chain().focus().toggleBlockquote().run(); }} />
-                    <MenuItem label="Div" check={editor.isActive('div')} onClick={() => { close(); editor.chain().focus().wrapIn('div').run(); }} />
-                    <MenuItem label={<span className="rounded border border-slate-200 bg-slate-50 px-1.5 font-mono text-[13px]">Pre</span>} check={editor.isActive('codeBlock')} onClick={() => { close(); editor.chain().focus().toggleCodeBlock().run(); }} />
-                  </Sub>
-                  <Sub label="Align" width="w-40">
-                    <MenuItem icon={I.alignLeft} label="Left" active={editor.isActive({ textAlign: 'left' })} onClick={() => { close(); editor.chain().focus().setTextAlign('left').run(); }} />
-                    <MenuItem icon={I.alignCenter} label="Center" active={editor.isActive({ textAlign: 'center' })} onClick={() => { close(); editor.chain().focus().setTextAlign('center').run(); }} />
-                    <MenuItem icon={I.alignRight} label="Right" active={editor.isActive({ textAlign: 'right' })} onClick={() => { close(); editor.chain().focus().setTextAlign('right').run(); }} />
-                    <MenuItem icon={I.alignJustify} label="Justify" active={editor.isActive({ textAlign: 'justify' })} onClick={() => { close(); editor.chain().focus().setTextAlign('justify').run(); }} />
-                  </Sub>
-                </Sub>
-
-                <Sub label="Blocks" width="w-52">
-                  <MenuItem label="Paragraph" check={editor.isActive('paragraph')} onClick={() => { close(); editor.chain().focus().setParagraph().run(); }} />
-                  {[1, 2, 3, 4].map((lvl) => (
-                    <MenuItem key={lvl} label={`Heading ${lvl}`} check={editor.isActive('heading', { level: lvl })}
-                      onClick={() => { close(); editor.chain().focus().toggleHeading({ level: lvl as 1 | 2 | 3 | 4 }).run(); }} />
-                  ))}
-                  <MenuItem label="Preformatted" check={editor.isActive('codeBlock')} onClick={() => { close(); editor.chain().focus().toggleCodeBlock().run(); }} />
-                  <MenuItem label="Code" check={editor.isActive('code')} onClick={() => { close(); editor.chain().focus().toggleCode().run(); }} />
-                </Sub>
-
-                <Sub label="Fonts" width="w-56">
-                  {FONTS.map((f) => (
-                    <MenuItem key={f} label={<span style={{ fontFamily: f }}>{f}</span>}
-                      active={editor.isActive('textStyle', { fontFamily: f })}
-                      onClick={() => { close(); editor.chain().focus().setFontFamily(f).run(); }} />
-                  ))}
-                </Sub>
-
-                <Sub label="Font sizes" width="w-32">
-                  {FONT_SIZES.map((s) => (
-                    <MenuItem key={s} label={s} check={editor.isActive('textStyle', { fontSize: s })}
-                      onClick={() => { close(); editor.chain().focus().setFontSize(s).run(); }} />
-                  ))}
-                </Sub>
-
-                <Sub label="Align" width="w-40">
-                  <MenuItem icon={I.alignLeft} label="Left" active={editor.isActive({ textAlign: 'left' })} onClick={() => { close(); editor.chain().focus().setTextAlign('left').run(); }} />
-                  <MenuItem icon={I.alignCenter} label="Center" active={editor.isActive({ textAlign: 'center' })} onClick={() => { close(); editor.chain().focus().setTextAlign('center').run(); }} />
-                  <MenuItem icon={I.alignRight} label="Right" active={editor.isActive({ textAlign: 'right' })} onClick={() => { close(); editor.chain().focus().setTextAlign('right').run(); }} />
-                  <MenuItem icon={I.alignJustify} label="Justify" active={editor.isActive({ textAlign: 'justify' })} onClick={() => { close(); editor.chain().focus().setTextAlign('justify').run(); }} />
-                </Sub>
-
-                <Sub label="Line height" width="w-28">
-                  {LINE_HEIGHTS.map((h) => (
-                    <MenuItem key={h} label={h} onClick={() => { close(); editor.chain().focus().setLineHeight(h).run(); }} />
-                  ))}
-                </Sub>
-
-                <MenuSep />
-                <Sub label="Text color" icon={I.colorA} width="w-[248px]">
-                  <ColorGrid onPick={(c) => { close(); editor.chain().focus().setColor(c).run(); }}
-                             onClear={() => { close(); editor.chain().focus().unsetColor().run(); }}
-                             onCustom={() => openCustomColor((c) => { close(); editor.chain().focus().setColor(c).run(); })} />
-                </Sub>
-                <Sub label="Background color" icon={I.highlighter} width="w-[248px]">
-                  <ColorGrid onPick={(c) => { close(); editor.chain().focus().setHighlight({ color: c }).run(); }}
-                             onClear={() => { close(); editor.chain().focus().unsetHighlight().run(); }}
-                             onCustom={() => openCustomColor((c) => { close(); editor.chain().focus().setHighlight({ color: c }).run(); })} />
-                </Sub>
-                <MenuSep />
-                <MenuItem icon={I.eraser} label="Clear formatting"
-                  onClick={() => { close(); clearFormat(); }} />
-              </Dropdown>
-            )}
-            {m === 'Tools' && openMenu === 'Tools' && (
-              <Dropdown width="w-48">
-                <MenuItem icon={I.code} label="Source code"
-                  onClick={() => { close(); setSourceOpen(true); }} />
-              </Dropdown>
-            )}
-            {m === 'Table' && openMenu === 'Table' && (
-              <Dropdown width="w-48">
-                <Sub label="Table" icon={I.table} width="w-auto">
-                  <div className="p-2">
-                    <TableGrid onPick={(r, c) => { editor.chain().focus().insertTable({ rows: r, cols: c, withHeaderRow: true }).run(); close(); }} />
-                  </div>
-                </Sub>
-                <Sub label="Cell" width="w-52">
-                  <MenuItem label="Cell properties" disabled />
-                  <MenuItem label="Merge cells" disabled={!inTable} onClick={() => { close(); editor.chain().focus().mergeCells().run(); }} />
-                  <MenuItem label="Split cell" disabled={!inTable} onClick={() => { close(); editor.chain().focus().splitCell().run(); }} />
-                </Sub>
-                <Sub label="Row" width="w-56">
-                  <MenuItem label="Insert row before" disabled={!inTable} onClick={() => { close(); editor.chain().focus().addRowBefore().run(); }} />
-                  <MenuItem label="Insert row after" disabled={!inTable} onClick={() => { close(); editor.chain().focus().addRowAfter().run(); }} />
-                  <MenuItem label="Delete row" disabled={!inTable} onClick={() => { close(); editor.chain().focus().deleteRow().run(); }} />
-                  <MenuItem label="Row properties" disabled />
-                  <MenuSep />
-                  <MenuItem label="Cut row" disabled />
-                  <MenuItem label="Copy row" disabled />
-                  <MenuItem label="Paste row before" disabled />
-                  <MenuItem label="Paste row after" disabled />
-                </Sub>
-                <Sub label="Column" width="w-56">
-                  <MenuItem label="Insert column before" disabled={!inTable} onClick={() => { close(); editor.chain().focus().addColumnBefore().run(); }} />
-                  <MenuItem label="Insert column after" disabled={!inTable} onClick={() => { close(); editor.chain().focus().addColumnAfter().run(); }} />
-                  <MenuItem label="Delete column" disabled={!inTable} onClick={() => { close(); editor.chain().focus().deleteColumn().run(); }} />
-                  <MenuSep />
-                  <MenuItem label="Cut column" disabled />
-                  <MenuItem label="Copy column" disabled />
-                  <MenuItem label="Paste column before" disabled />
-                  <MenuItem label="Paste column after" disabled />
-                </Sub>
-                <MenuSep />
-                <MenuItem label="Table properties" disabled />
-                <MenuItem icon={I.deleteTable} label="Delete table" disabled={!inTable}
-                  onClick={() => { close(); editor.chain().focus().deleteTable().run(); }} />
-              </Dropdown>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Row 1 */}
+      {/* Single dense toolbar row — everything else lives behind grouped
+          dropdowns/overflow menus below; only Source code and Fullscreen sit
+          on the thin utility line under it. */}
       <div className="flex flex-wrap items-center gap-0.5 border-b border-slate-200 px-2 py-1">
         <Btn title="Undo (⌘Z)" onClick={() => editor.chain().focus().undo().run()}
              disabled={!editor.can().chain().focus().undo().run()}>
@@ -713,21 +476,33 @@ export function EditorToolbar({
         </Btn>
         <Divider />
 
+        <Btn title="Find and replace (⌘F)" onClick={() => setFindOpen(true)}>
+          <Icon>{I.search}</Icon>
+        </Btn>
+        <Divider />
+
         <BlockTypeMenu editor={editor} />
         <Divider />
 
-        <Btn title="Align left" active={editor.isActive({ textAlign: 'left' })}
-             onClick={() => editor.chain().focus().setTextAlign('left').run()}>
-          <Icon>{I.alignLeft}</Icon>
-        </Btn>
-        <Btn title="Align centre" active={editor.isActive({ textAlign: 'center' })}
-             onClick={() => editor.chain().focus().setTextAlign('center').run()}>
-          <Icon>{I.alignCenter}</Icon>
-        </Btn>
-        <Btn title="Align right" active={editor.isActive({ textAlign: 'right' })}
-             onClick={() => editor.chain().focus().setTextAlign('right').run()}>
-          <Icon>{I.alignRight}</Icon>
-        </Btn>
+        {/* Lists + indent, grouped — matches the reference's single list dropdown
+            instead of four permanently-visible icons. */}
+        <OverflowMenu title="Lists and indent" width="w-52" icon={<Icon>{I.bulletList}</Icon>}>
+          {(close) => (
+            <>
+              <MenuItem icon={I.bulletList} label="Bullet List" active={editor.isActive('bulletList')}
+                onClick={() => { close(); editor.chain().focus().toggleBulletList().run(); }} />
+              <MenuItem icon={I.orderedList} label="Ordered List" active={editor.isActive('orderedList')}
+                onClick={() => { close(); editor.chain().focus().toggleOrderedList().run(); }} />
+              <MenuItem icon={I.taskList} label="Task List" active={editor.isActive('taskList')}
+                onClick={() => { close(); editor.chain().focus().toggleTaskList().run(); }} />
+              <MenuSep />
+              <MenuItem icon={I.indent} label="Increase indentation"
+                onClick={() => { close(); editor.chain().focus().indent().run(); }} />
+              <MenuItem icon={I.outdent} label="Decrease indentation"
+                onClick={() => { close(); editor.chain().focus().outdent().run(); }} />
+            </>
+          )}
+        </OverflowMenu>
         <Divider />
 
         <Btn title="Bold (⌘B)" active={editor.isActive('bold')}
@@ -738,115 +513,182 @@ export function EditorToolbar({
              onClick={() => editor.chain().focus().toggleItalic().run()}>
           <span className="font-serif text-[15px] italic">I</span>
         </Btn>
-        <Btn title="Underline (⌘U)" active={editor.isActive('underline')}
-             onClick={() => editor.chain().focus().toggleUnderline().run()}>
-          <span className="text-[15px] underline">U</span>
-        </Btn>
 
-        <ColorPalette
-          title="Text colour"
-          current={textColor}
-          onPick={(c) => editor.chain().focus().setColor(c).run()}
-          onClear={() => editor.chain().focus().unsetColor().run()}
-          onCustom={() => openCustomColor((c) => editor.chain().focus().setColor(c).run())}
-          swatch={
-            <span className="grid place-items-center leading-none">
-              <span className="text-[14px] font-semibold">A</span>
-              <span className="mt-0.5 block h-[3px] w-[15px] rounded-sm"
-                    style={{ background: textColor ?? '#0f172a' }} />
-            </span>
-          }
+        <TextHighlightColorPicker
+          textColor={textColor}
+          highlightColor={highlightColor}
+          onPickText={(c) => editor.chain().focus().setColor(c).run()}
+          onClearText={() => editor.chain().focus().unsetColor().run()}
+          onPickHighlight={(c) => editor.chain().focus().setHighlight({ color: c }).run()}
+          onClearHighlight={() => editor.chain().focus().unsetHighlight().run()}
         />
 
-        <ColorPalette
-          title="Highlight colour"
-          current={highlight}
-          onPick={(c) => editor.chain().focus().setHighlight({ color: c }).run()}
-          onClear={() => editor.chain().focus().unsetHighlight().run()}
-          onCustom={() => openCustomColor((c) => editor.chain().focus().setHighlight({ color: c }).run())}
-          swatch={
-            <span className="grid place-items-center leading-none">
-              {/* Highlighter pen only — no built-in bar, since the coloured
-                  swatch below already shows the current colour. */}
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M15.6 3.4 8.5 10.5l-1.4 4.2 4.2-1.4 7.1-7.1-2.8-2.8z" />
-              </svg>
-              <span className="mt-0.5 block h-[3px] w-[15px] rounded-sm"
-                    style={{ background: highlight ?? '#fbeeb8' }} />
-            </span>
-          }
-        />
-
-        <Btn title="Clear formatting — removes bold, italic, colour and headings"
-             onClick={clearFormat}>
-          <Icon>{I.eraser}</Icon>
-        </Btn>
+        {/* Underline, strike, sup/sub, code, clear formatting — everything
+            past Bold/Italic/colour collapses into one overflow, matching the
+            reference's single "⋯". */}
+        <OverflowMenu title="More formatting" width="w-56" icon={<Icon size={16}>{I.dots}</Icon>}>
+          {(close) => (
+            <>
+              <MenuItem glyph={<span className="text-[15px] underline">U</span>} label="Underline" shortcut="⌘U" active={editor.isActive('underline')}
+                onClick={() => { close(); editor.chain().focus().toggleUnderline().run(); }} />
+              <MenuItem glyph={<span className="text-[15px] line-through">S</span>} label="Strikethrough" active={editor.isActive('strike')}
+                onClick={() => { close(); editor.chain().focus().toggleStrike().run(); }} />
+              <MenuItem glyph={<span className="text-[13px] font-semibold">x²</span>} label="Superscript" active={editor.isActive('superscript')}
+                onClick={() => { close(); editor.chain().focus().toggleSuperscript().run(); }} />
+              <MenuItem glyph={<span className="text-[13px] font-semibold">x₂</span>} label="Subscript" active={editor.isActive('subscript')}
+                onClick={() => { close(); editor.chain().focus().toggleSubscript().run(); }} />
+              <MenuItem icon={I.code} label="Code" active={editor.isActive('code')}
+                onClick={() => { close(); editor.chain().focus().toggleCode().run(); }} />
+              <MenuSep />
+              <MenuItem icon={I.eraser} label="Clear formatting"
+                onClick={() => { close(); clearFormat(); }} />
+            </>
+          )}
+        </OverflowMenu>
         <Divider />
 
-        <Btn title="Bullet list" active={editor.isActive('bulletList')}
-             onClick={() => editor.chain().focus().toggleBulletList().run()}>
-          <Icon>{I.bulletList}</Icon>
-        </Btn>
-        <Btn title="Numbered list" active={editor.isActive('orderedList')}
-             onClick={() => editor.chain().focus().toggleOrderedList().run()}>
-          <Icon>{I.orderedList}</Icon>
-        </Btn>
-        <Btn title="Decrease indent"
-             onClick={() => editor.chain().focus().outdent().run()}>
-          <Icon>{I.outdent}</Icon>
-        </Btn>
-        <Btn title="Increase indent"
-             onClick={() => editor.chain().focus().indent().run()}>
-          <Icon>{I.indent}</Icon>
-        </Btn>
-      </div>
-
-      {/* Row 2 */}
-      <div className="flex flex-wrap items-center gap-0.5 px-2 py-1">
-        <Btn title="Insert or edit link" active={editor.isActive('link')} onClick={openLink}>
+        <Btn title="Insert or edit link (⌘K)" active={editor.isActive('link')} onClick={openLink}>
           <Icon>{I.link}</Icon>
         </Btn>
-        <Btn title="Remove link" disabled={!editor.isActive('link')}
-             onClick={() => editor.chain().focus().unsetLink().run()}>
-          <Icon>{I.unlink}</Icon>
-        </Btn>
+        <TableMenu editor={editor} />
         <Btn title="Insert or edit image" onClick={() => setImageOpen(true)}>
           <Icon>{I.image}</Icon>
         </Btn>
-        <Btn title="Insert or edit media" onClick={() => setMediaOpen(true)} wide>
-          <span className="text-red-600"><Icon>{I.youtube}</Icon></span>
-          <span className="text-[13px] text-slate-700">Video</span>
-        </Btn>
-        <TableMenu editor={editor} />
+
+        {/* Less-frequent inserts, grouped behind one overflow menu. */}
+        <OverflowMenu title="More insert options" width="w-56" icon={<Icon size={16}>{I.dots}</Icon>}>
+          {(close) => (
+            <>
+              <MenuItem icon={I.media} label="Media…"
+                onClick={() => { close(); setMediaOpen(true); }} />
+              <MenuItem icon={I.omega} label="Special character…"
+                onClick={() => { close(); setSpecialOpen(true); }} />
+              <MenuItem icon={I.hr} label="Horizontal line"
+                onClick={() => { close(); editor.chain().focus().setHorizontalRule().run(); }} />
+              <MenuSep />
+              <MenuItem icon={I.toc} label="Table of contents" disabled />
+            </>
+          )}
+        </OverflowMenu>
         <Divider />
+
+        {/* Alignment collapsed to one dropdown (was 3 separate always-on
+            buttons); the trigger icon reflects the current alignment, and
+            Justify — previously buried in Format — is now reachable here. */}
+        <OverflowMenu
+          title="Alignment"
+          width="w-40"
+          icon={<Icon>
+            {editor.isActive({ textAlign: 'center' }) ? I.alignCenter
+              : editor.isActive({ textAlign: 'right' }) ? I.alignRight
+              : editor.isActive({ textAlign: 'justify' }) ? I.alignJustify
+              : I.alignLeft}
+          </Icon>}
+        >
+          {(close) => (
+            <>
+              <MenuItem icon={I.alignLeft} label="Left" active={editor.isActive({ textAlign: 'left' })} onClick={() => { close(); editor.chain().focus().setTextAlign('left').run(); }} />
+              <MenuItem icon={I.alignCenter} label="Center" active={editor.isActive({ textAlign: 'center' })} onClick={() => { close(); editor.chain().focus().setTextAlign('center').run(); }} />
+              <MenuItem icon={I.alignRight} label="Right" active={editor.isActive({ textAlign: 'right' })} onClick={() => { close(); editor.chain().focus().setTextAlign('right').run(); }} />
+              <MenuItem icon={I.alignJustify} label="Justify" active={editor.isActive({ textAlign: 'justify' })} onClick={() => { close(); editor.chain().focus().setTextAlign('justify').run(); }} />
+            </>
+          )}
+        </OverflowMenu>
+
+        <div className="ml-auto">
+          {/* Everything that used to live in File / Edit / View / Tools /
+              Format's typography extras — consolidated into one overflow
+              menu at the end of the toolbar instead of a permanent menu bar. */}
+          <OverflowMenu title="More" width="w-60" align="right" icon={<Icon size={16}>{I.dots}</Icon>}>
+            {(close) => (
+              <>
+                <MenuItem icon={I.newDoc} label="New document"
+                  onClick={() => { close(); setConfirmNew(true); }} />
+                <MenuItem icon={I.eye} label="Preview"
+                  onClick={() => { close(); setPreview(true); }} />
+                <MenuItem icon={I.print} label="Print…"
+                  onClick={() => { close(); printContent(); }} />
+                <MenuItem icon={I.track} label="Track changes (coming in Phase 2)" disabled />
+                <MenuSep />
+                <MenuItem icon={I.cut} label="Cut" shortcut="⌘X" onClick={() => { close(); cut(); }} />
+                <MenuItem icon={I.copy} label="Copy" shortcut="⌘C" onClick={() => { close(); copy(); }} />
+                <MenuItem icon={I.paste} label="Paste" shortcut="⌘V" onClick={() => { close(); paste(); }} />
+                <MenuItem icon={I.paste} label="Paste as text" onClick={() => { close(); pasteAsText(); }} />
+                <MenuItem icon={I.selectAll} label="Select all" shortcut="⌘A"
+                  onClick={() => { close(); editor.chain().focus().selectAll().run(); }} />
+                <MenuSep />
+                {/* Toggles keep the menu open so the check visibly flips. */}
+                <MenuItem label="Visual aids" check={visualAids}
+                  onClick={() => setVisualAids((v) => !v)} />
+                <MenuItem icon={I.pilcrow} label="Show blocks" check={showBlocks}
+                  onClick={() => setShowBlocks((v) => !v)} />
+                <MenuSep />
+                <Sub label="Blocks" width="w-44">
+                  <MenuItem label="Paragraph" check={editor.isActive('paragraph')} onClick={() => { close(); editor.chain().focus().setParagraph().run(); }} />
+                  <MenuItem label={<span className="italic">Blockquote</span>} check={editor.isActive('blockquote')} onClick={() => { close(); editor.chain().focus().toggleBlockquote().run(); }} />
+                  <MenuItem label="Div" check={editor.isActive('div')} onClick={() => { close(); editor.chain().focus().wrapIn('div').run(); }} />
+                  <MenuItem label={<span className="rounded border border-slate-200 bg-slate-50 px-1.5 font-mono text-[13px]">Pre</span>} check={editor.isActive('codeBlock')} onClick={() => { close(); editor.chain().focus().toggleCodeBlock().run(); }} />
+                </Sub>
+                <Sub label="Fonts" width="w-56">
+                  {FONTS.map((f) => (
+                    <MenuItem key={f} label={<span style={{ fontFamily: f }}>{f}</span>}
+                      active={editor.isActive('textStyle', { fontFamily: f })}
+                      onClick={() => { close(); editor.chain().focus().setFontFamily(f).run(); }} />
+                  ))}
+                </Sub>
+                <Sub label="Font sizes" width="w-32">
+                  {FONT_SIZES.map((s) => (
+                    <MenuItem key={s} label={s} check={editor.isActive('textStyle', { fontSize: s })}
+                      onClick={() => { close(); editor.chain().focus().setFontSize(s).run(); }} />
+                  ))}
+                </Sub>
+                <Sub label="Line height" width="w-28">
+                  {LINE_HEIGHTS.map((h) => (
+                    <MenuItem key={h} label={h} onClick={() => { close(); editor.chain().focus().setLineHeight(h).run(); }} />
+                  ))}
+                </Sub>
+              </>
+            )}
+          </OverflowMenu>
+        </div>
+      </div>
+
+      {/* Thin utility line — just the rarely-touched icons, right-aligned,
+          matching the reference's near-empty second line. */}
+      <div className="flex items-center justify-end gap-0.5 px-2 py-1">
+        {/* Comment on the whole field — the same anchor/thread the field's
+            own header and gutter comment icons use (see Field.tsx), so all
+            three affordances share one comment count and thread per field. */}
+        {fieldId ? (
+          <CommentPopoverTrigger
+            match={(c) => (c.anchor === 'field' || c.anchor === 'text') && c.field_id === fieldId}
+            newAnchor={{ anchor: 'field', fieldId }}
+            title="Comment on this field"
+            badgePlacement="tr"
+            buttonClass="flex h-8 w-8 items-center justify-center rounded text-slate-700 transition hover:bg-slate-200"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
+              <line x1="12" y1="8" x2="12" y2="13" />
+              <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
+            </svg>
+          </CommentPopoverTrigger>
+        ) : (
+          <Btn title="Add a comment" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
+              <line x1="12" y1="8" x2="12" y2="13" />
+              <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
+            </svg>
+          </Btn>
+        )}
         <Btn title="Source code" onClick={() => setSourceOpen(true)}>
           <Icon>{I.code}</Icon>
         </Btn>
-        <Btn title="Fullscreen" active={fullscreen} onClick={toggleFullscreen}>
+        <Btn title="Fullscreen (⇧⌘F)" active={fullscreen} onClick={toggleFullscreen}>
           <Icon>{I.fullscreen}</Icon>
-        </Btn>
-        <Divider />
-
-        {/* Phase 2 — icon-only and disabled, like the rest of the row.
-            Drawn to match the reference: a speech bubble with a plus, and a
-            pen writing over text lines. */}
-        <Btn title="Add a comment — coming in Phase 2" disabled>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 4H4a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 4 17h3v3.2L11 17h9a1.5 1.5 0 0 0 1.5-1.5v-10A1.5 1.5 0 0 0 20 4z" />
-            <line x1="12" y1="8" x2="12" y2="13" />
-            <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
-          </svg>
-        </Btn>
-        <Btn title="Track Changes — coming in Phase 2" disabled wide>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="3" y1="7" x2="13" y2="7" />
-            <line x1="3" y1="12" x2="9" y2="12" />
-            <line x1="3" y1="17" x2="8" y2="17" />
-            <path d="M19.5 6.5a1.6 1.6 0 0 1 2.3 2.3l-6.3 6.3-3 .7.7-3 6.3-6.3z" />
-          </svg>
-          <span className="text-[13px]">Track Changes</span>
         </Btn>
       </div>
 
@@ -854,21 +696,16 @@ export function EditorToolbar({
       {confirmNew && <ConfirmNew onCancel={() => setConfirmNew(false)} onConfirm={newDocument} />}
       {sourceOpen && <SourceCodeModal initial={editor.getHTML()} onApply={applySource} onClose={() => setSourceOpen(false)} />}
       {specialOpen && <SpecialCharDialog onPick={insertChar} onClose={() => setSpecialOpen(false)} />}
-      {linkOpen && <LinkDialog initial={linkInit} onSave={applyLink} onClose={() => setLinkOpen(false)} />}
+      {linkOpen && <LinkDialog initial={linkInit} onSave={applyLink} onClose={() => setLinkOpen(false)} linkedFiles={linkedFiles} />}
       {mediaOpen && <MediaDialog onSave={applyMedia} onClose={() => setMediaOpen(false)} />}
       {findOpen && <FindReplaceDialog editor={editor} onClose={() => setFindOpen(false)} />}
 
-      {/* Insert Image dialog + custom colour picker — rendered LAST, AFTER the
-          BubbleMenu. A conditional sibling placed BEFORE the tippy-relocated
-          BubbleMenu element crashes React reconciliation (insertBefore /
-          NotFoundError); appending at the end avoids that. */}
+      {/* Insert Image dialog — rendered LAST, AFTER the BubbleMenu. A
+          conditional sibling placed BEFORE the tippy-relocated BubbleMenu
+          element crashes React reconciliation (insertBefore / NotFoundError);
+          appending at the end avoids that. */}
       {imageOpen && (
         <ImageDialog onClose={() => setImageOpen(false)} onSave={insertImage} onUpload={onUpload} linkedImages={linkedImages} />
-      )}
-      {colorPicker && (
-        <ColorPickerDialog initial="#000000"
-                           onClose={() => setColorPicker(null)}
-                           onSave={(c) => { colorPicker.apply(c); setColorPicker(null); }} />
       )}
     </div>
   );
@@ -879,11 +716,46 @@ function escapeHtml(s: string) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
 }
 
-/** Shared dropdown container for the menu-bar menus. */
-function Dropdown({ width, children }: { width: string; children: React.ReactNode }) {
+/** Shared dropdown container for the toolbar's grouped menus. `align="right"`
+ *  hangs the panel off the trigger's right edge instead of its left — needed
+ *  for triggers that sit at (or near) the toolbar's right edge, so the panel
+ *  opens back over the toolbar instead of running off the viewport. */
+function Dropdown({ width, align = 'left', children }: { width: string; align?: 'left' | 'right'; children: React.ReactNode }) {
   return (
-    <div className={`absolute left-0 top-full z-30 mt-1 ${width} rounded-md border border-slate-200 bg-white py-1 shadow-xl`}>
+    <div className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full z-30 mt-1 ${width} rounded-md border border-slate-200 bg-white py-1 shadow-xl`}>
       {children}
+    </div>
+  );
+}
+
+/** A toolbar icon button that opens a Dropdown of MenuItems — the building
+ *  block for every grouped/overflow control (lists, alignment, "more…").
+ *  `children` is a render-prop so callers can close the menu after acting. */
+function OverflowMenu({
+  title, icon, width = 'w-56', align = 'left', children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  width?: string;
+  align?: 'left' | 'right';
+  children: (close: () => void) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useClickAway(() => setOpen(false));
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((v) => !v)}
+        title={title}
+        aria-label={title}
+        className={`flex h-8 items-center gap-0.5 rounded px-1.5 text-slate-700 transition hover:bg-slate-200 ${open ? 'bg-slate-200' : ''}`}
+      >
+        {icon}
+        <span className="text-[9px] leading-none text-slate-500">▾</span>
+      </button>
+      {open && <Dropdown width={width} align={align}>{children(() => setOpen(false))}</Dropdown>}
     </div>
   );
 }
@@ -933,7 +805,10 @@ function MenuItem({
 }
 
 /** A menu row that reveals a flyout submenu to the right on hover. Composes to
- *  any depth (Format › Formats › Headings). */
+ *  any depth (Format › Formats › Headings). Flips to open leftward instead
+ *  when it would otherwise be clipped — measured against its own real
+ *  rendered position (window edge, or a nearer `overflow-hidden` ancestor
+ *  such as the field's card), not a guess. */
 function Sub({
   label, icon, glyph, width = 'w-48', scroll = true, children,
 }: {
@@ -947,6 +822,8 @@ function Sub({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const flip = useOverflowsRight(panelRef, open);
   return (
     <div className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
       <div className="flex cursor-default items-center gap-3 px-3 py-2 text-[14px] text-slate-700 hover:bg-slate-50">
@@ -957,7 +834,7 @@ function Sub({
         <span className="text-slate-400">›</span>
       </div>
       {open && (
-        <div className={`absolute left-full top-0 z-40 -ml-1 ${scroll ? 'max-h-[70vh] overflow-y-auto' : ''} ${width} rounded-md border border-slate-200 bg-white py-1 shadow-xl`}>
+        <div ref={panelRef} className={`absolute ${flip ? 'right-full top-0 -mr-1' : 'left-full top-0 -ml-1'} z-40 ${scroll ? 'max-h-[70vh] overflow-y-auto' : ''} ${width} rounded-md border border-slate-200 bg-white py-1 shadow-xl`}>
           {children}
         </div>
       )}
@@ -969,41 +846,6 @@ function MenuSep() {
   return <div className="my-1 border-t border-slate-200" />;
 }
 
-/**
- * The table-size grid picker (Insert › Table and Table › Table). A cols×rows grid
- * of cells; hovering highlights the top-left rectangle and shows "NxN", clicking
- * inserts that size. Uses an inline grid-template-columns so the layout is robust
- * regardless of Tailwind class generation, and owns its own hover state so the two
- * pickers don't share/leak a highlight.
- */
-function TableGrid({ cols = 10, rows = 10, onPick }: { cols?: number; rows?: number; onPick: (r: number, c: number) => void }) {
-  const [hover, setHover] = useState({ r: 0, c: 0 });
-  return (
-    <div onMouseLeave={() => setHover({ r: 0, c: 0 })}>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1rem)`, gap: '2px' }}>
-        {Array.from({ length: cols * rows }, (_, i) => {
-          const r = Math.floor(i / cols) + 1;
-          const c = (i % cols) + 1;
-          const on = r <= hover.r && c <= hover.c;
-          return (
-            <button
-              key={i}
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setHover({ r, c })}
-              onClick={() => onPick(r, c)}
-              className={`h-4 w-4 rounded-[2px] border ${on ? 'border-blue-500 bg-blue-200' : 'border-slate-300 bg-white'}`}
-            />
-          );
-        })}
-      </div>
-      <div className="mt-1.5 text-center text-[12px] text-slate-500">
-        {hover.r > 0 ? `${hover.c}x${hover.r}` : 'Pick a size'}
-      </div>
-    </div>
-  );
-}
-
 const FONTS = [
   'Andale Mono', 'Arial', 'Arial Black', 'Book Antiqua', 'Comic Sans MS', 'Courier New',
   'Georgia', 'Helvetica', 'Impact', 'Symbol', 'Tahoma', 'Terminal', 'Times New Roman',
@@ -1012,52 +854,35 @@ const FONTS = [
 const FONT_SIZES = ['8pt', '10pt', '12pt', '14pt', '18pt', '24pt', '36pt'];
 const LINE_HEIGHTS = ['1', '1.1', '1.2', '1.3', '1.4', '1.5', '2'];
 
-const PALETTE = [
-  '#000000', '#434343', '#666666', '#999999', '#b7b7b7', '#cccccc', '#d9d9d9', '#efefef', '#f3f3f3', '#ffffff',
-  '#980000', '#ff0000', '#ff9900', '#ffff00', '#00ff00', '#00ffff', '#4a86e8', '#0000ff', '#9900ff', '#ff00ff',
-  '#e6b8af', '#f4cccc', '#fce5cd', '#fff2cc', '#d9ead3', '#d0e0e3', '#c9daf8', '#cfe2f3', '#d9d2e9', '#ead1dc',
-];
-
-/** A compact swatch grid used by Format › Text color / Background color. */
-function ColorGrid({ onPick, onClear, onCustom }: { onPick: (c: string) => void; onClear: () => void; onCustom: () => void }) {
-  return (
-    <div className="p-2">
-      <div className="grid grid-cols-10 gap-1">
-        {PALETTE.map((c) => (
-          <button key={c} type="button" title={c} onMouseDown={(e) => e.preventDefault()} onClick={() => onPick(c)}
-                  className="h-5 w-5 rounded-[3px] border border-slate-300" style={{ background: c }} />
-        ))}
-      </div>
-      <div className="mt-2 flex items-center gap-1">
-        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={onClear}
-                className="flex flex-1 items-center gap-2 rounded px-2 py-1.5 text-[13px] text-slate-600 hover:bg-slate-100">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-          Remove color
-        </button>
-        {/* Custom colour — the native picker is rendered once at the toolbar root
-            (openCustomColor), so it survives this hover-menu closing. */}
-        <button type="button" title="Custom color" onMouseDown={(e) => e.preventDefault()} onClick={onCustom}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded text-slate-700 hover:bg-slate-100">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2C6.49 2 2 6.49 2 12s4.49 10 10 10c.93 0 1.68-.75 1.68-1.68 0-.44-.17-.83-.44-1.13-.26-.29-.43-.68-.43-1.11 0-.93.75-1.68 1.68-1.68H16c3.31 0 6-2.69 6-6 0-4.96-4.49-9-10-9zM6.5 13c-.83 0-1.5-.67-1.5-1.5S5.67 10 6.5 10 8 10.67 8 11.5 7.33 13 6.5 13zm3-4C8.67 9 8 8.33 8 7.5S8.67 6 9.5 6s1.5.67 1.5 1.5S10.33 9 9.5 9zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 6 14.5 6s1.5.67 1.5 1.5S15.33 9 14.5 9zm3 4c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
-          </svg>
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /** View › Source code — edit the field's raw HTML and apply it back. */
 function SourceCodeModal({ initial, onApply, onClose }: { initial: string; onApply: (html: string) => void; onClose: () => void }) {
   const [html, setHtml] = useState(initial);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(html);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard blocked — user can still select-all + ⌘C */ }
+  };
   return (
     <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-900/40 p-6" onMouseDown={onClose}>
       <div onMouseDown={(e) => e.stopPropagation()} className="flex max-h-[85vh] w-[820px] max-w-full flex-col rounded-lg bg-white shadow-2xl">
         <header className="flex items-center justify-between border-b border-slate-200 px-6 py-3">
           <h2 className="text-[19px] font-semibold text-slate-900">Source code</h2>
-          <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded text-slate-500 hover:bg-slate-100">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={copy}
+                    className="flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-[13px] font-medium text-slate-700 hover:bg-slate-50">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <rect x="9" y="9" width="11" height="11" rx="1.5" />
+                <path d="M5 15V5a1.5 1.5 0 0 1 1.5-1.5H15" />
+              </svg>
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+            <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded text-slate-500 hover:bg-slate-100">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </button>
+          </div>
         </header>
         <textarea
           value={html}

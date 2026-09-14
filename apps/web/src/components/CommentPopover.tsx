@@ -55,8 +55,12 @@ export function CommentPopoverTrigger({
       </button>
       {pos && createPortal(
         <>
-          <div className="fixed inset-0 z-40" onMouseDown={() => setPos(null)} />
-          <div style={{ position: 'fixed', left: pos.x, top: pos.y, zIndex: 50 }}
+          {/* z-62/63 — above the editor's own fullscreen overlay (z-[60] in
+              RichTextField), which this trigger can be opened from (the
+              toolbar and field-gutter comment icons). At z-40/50 the popover
+              opened but was rendered invisibly behind the fullscreen view. */}
+          <div className="fixed inset-0 z-[62]" onMouseDown={() => setPos(null)} />
+          <div style={{ position: 'fixed', left: pos.x, top: pos.y, zIndex: 63 }}
                className="w-[340px] max-w-[92vw] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
                onMouseDown={(e) => e.stopPropagation()}>
             <CommentPanel itemId={itemId} match={match} newAnchor={newAnchor} quote={quote} autoFocusComposer={count === 0} />
@@ -101,8 +105,10 @@ export function TextCommentButton({
       <button ref={ref} type="button" title={title} onMouseDown={(e) => e.preventDefault()} onClick={open} className={buttonClass}>{children}</button>
       {pop && createPortal(
         <>
-          <div className="fixed inset-0 z-40" onMouseDown={() => setPop(null)} />
-          <div style={{ position: 'fixed', left: pop.x, top: pop.y, zIndex: 50 }}
+          {/* Same z-62/63 fix as CommentPopoverTrigger — this button lives in
+              the selection bubble menu, which is reachable in fullscreen too. */}
+          <div className="fixed inset-0 z-[62]" onMouseDown={() => setPop(null)} />
+          <div style={{ position: 'fixed', left: pop.x, top: pop.y, zIndex: 63 }}
                className="w-[340px] max-w-[92vw] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
                onMouseDown={(e) => e.stopPropagation()}>
             <CommentPanel itemId={itemId} match={() => false}

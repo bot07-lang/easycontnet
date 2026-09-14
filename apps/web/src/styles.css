@@ -13,6 +13,16 @@
 .prose-editor ol { list-style: decimal; margin: .75rem 0; padding-left: 1.6rem; }
 .prose-editor li { margin: .3rem 0; }
 .prose-editor a  { color: #2563eb; text-decoration: underline; }
+/* Task list (Insert list › Task List): no bullet, checkbox + content laid out
+   side by side; nested task lists (TaskItem.configure({ nested: true })) get
+   the same left padding as regular lists so sub-items still indent. */
+.prose-editor ul[data-type="taskList"] { list-style: none; padding-left: 0; margin: .75rem 0; }
+.prose-editor ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: .5rem; margin: .3rem 0; }
+.prose-editor ul[data-type="taskList"] li > label { margin-top: .2rem; user-select: none; }
+.prose-editor ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
+.prose-editor ul[data-type="taskList"] li > div > p { margin: 0; }
+.prose-editor ul[data-type="taskList"] ul[data-type="taskList"] { padding-left: 1.6rem; }
+.prose-editor ul[data-type="taskList"] li[data-checked="true"] > div { color: #94a3b8; text-decoration: line-through; }
 .prose-editor img { max-width: 100%; height: auto; margin: 1rem 0; }
 /* Keyword highlight (CONTROLS › "Highlight in text"): green wash on matched text
    in the body; pink tags on the keyword list in the panel. Matching is literal

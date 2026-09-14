@@ -185,7 +185,7 @@ export class WorkflowService {
       return await this.db.withUser(user, async (c) => {
         const terminal = (
           await c.query(
-            `select id, position from public.workflow_statuses
+            `select id from public.workflow_statuses
               where project_id = $1 and is_terminal`,
             [projectId],
           )
@@ -193,10 +193,23 @@ export class WorkflowService {
 
         let position: number;
         if (terminal) {
-          await c.query(`update public.workflow_statuses set position = position + 2048 where id = $1`, [
-            terminal.id,
-          ]);
-          position = terminal.position;
+          // Read the terminal's position and bump it in ONE statement, so the
+          // new status's slot comes from the row's value at lock-acquisition
+          // time, not a separately-cached SELECT from before the UPDATE. Two
+          // concurrent creates both targeting the same terminal row serialize
+          // on Postgres's row lock — the second one bumps from the FIRST one's
+          // already-committed (already-bumped) position, so it can never land
+          // on the same slot. A prior version read position via a separate
+          // SELECT before the UPDATE, which could go stale under exactly that
+          // race and collide on `workflow_statuses_position_unique_per_project`.
+          position = (
+            await c.query(
+              `update public.workflow_statuses set position = position + 2048
+                where id = $1
+                returning position - 2048 as old_position`,
+              [terminal.id],
+            )
+          ).rows[0].old_position as number;
         } else {
           position = (
             await c.query(
@@ -361,8 +374,16 @@ export class WorkflowService {
 }
 
 function mapWriteError(err: unknown, forbiddenMsg = 'You cannot edit this workflow'): unknown {
-  const code = (err as { code?: string }).code;
-  if (code === RLS_VIOLATION) return new ForbiddenException(forbiddenMsg);
-  if (code === UNIQUE_VIOLATION) return new ForbiddenException('A status with that name already exists');
+  const e = err as { code?: string; constraint?: string };
+  if (e.code === RLS_VIOLATION) return new ForbiddenException(forbiddenMsg);
+  if (e.code === UNIQUE_VIOLATION) {
+    // Distinguish by constraint — a position clash (two statuses racing for
+    // the same ordering slot) isn't about the name and shouldn't be reported
+    // as one, even though createStatus's atomic read+bump above should make
+    // that collision unreachable in practice now.
+    return e.constraint === 'workflow_statuses_position_unique_per_project'
+      ? new ForbiddenException('Another status change is in progress — try again')
+      : new ForbiddenException('A status with that name already exists');
+  }
   return err;
 }

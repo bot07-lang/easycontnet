@@ -164,20 +164,35 @@ export class RolesService {
         const src = (
           await c.query(`select name, description from public.roles where id = $1`, [id])
         ).rows[0];
-        // Unique-per-org name: append "(copy)", then "(copy 2)"… until free.
-        let name = `${src.name} (copy)`;
-        for (let n = 2; ; n++) {
-          const taken = (await c.query(`select 1 from public.roles where org_id = $1 and name = $2`, [user.orgId, name])).rows.length;
-          if (!taken) break;
-          name = `${src.name} (copy ${n})`;
-        }
         const pos = (await c.query(`select coalesce(max(position), 0) + 1024 as pos from public.roles where org_id = $1`, [user.orgId])).rows[0].pos as number;
-        const newId = (
-          await c.query(
-            `insert into public.roles (org_id, name, description, position) values ($1, $2, $3, $4) returning id`,
-            [user.orgId, name, src.description, pos],
-          )
-        ).rows[0].id as string;
+
+        // Insert with "(copy)", retrying as "(copy 2)", "(copy 3)"… on an
+        // actual name collision. A separate upfront "is this name free?"
+        // check has a gap two concurrent Duplicate clicks on the same role
+        // can both pass before either has inserted — the retry-on-conflict
+        // here is race-free because it only ever reacts to a real, DB-
+        // confirmed collision, not a stale pre-check. A savepoint is needed
+        // because a failed insert would otherwise abort the whole
+        // transaction, including the role_permissions copy below.
+        await c.query('savepoint duplicate_role');
+        let newId: string | undefined;
+        for (let n = 1; ; n++) {
+          const name = n === 1 ? `${src.name} (copy)` : `${src.name} (copy ${n})`;
+          try {
+            newId = (
+              await c.query(
+                `insert into public.roles (org_id, name, description, position) values ($1, $2, $3, $4) returning id`,
+                [user.orgId, name, src.description, pos],
+              )
+            ).rows[0].id as string;
+            break;
+          } catch (err) {
+            const code = (err as { code?: string }).code;
+            if (code !== UNIQUE_VIOLATION || n > 50) throw err;
+            await c.query('rollback to savepoint duplicate_role');
+          }
+        }
+
         await c.query(
           `insert into public.role_permissions (role_id, permission_key)
              select $1, permission_key from public.role_permissions where role_id = $2`,
@@ -193,6 +208,22 @@ export class RolesService {
   async deleteRole(user: UserContext, id: string) {
     const role = await this.getRole(user, id);
     if (role.is_system) throw new ForbiddenException('System roles cannot be deleted');
+    // Same guardrail as revoking manage_roles via setPermission — deleting the
+    // last role that holds it is equivalent to silently revoking it from
+    // everyone, which would lock every non-owner admin out of role management.
+    const guard = await this.db.withUser(user, async (c) =>
+      (await c.query(
+        `select
+           exists(select 1 from public.role_permissions where role_id = $1 and permission_key = 'manage_roles') as holds,
+           (select count(*)::int from public.role_permissions rp
+              join public.roles r on r.id = rp.role_id
+             where r.org_id = $2 and rp.permission_key = 'manage_roles' and rp.role_id <> $1) as others`,
+        [id, user.orgId],
+      )).rows[0] as { holds: boolean; others: number },
+    );
+    if (guard.holds && guard.others === 0) {
+      throw new BadRequestException('You can’t delete the last role that has “Manage roles” — this would lock everyone out of role management.');
+    }
     try {
       await this.db.withUser(user, async (c) => c.query(`delete from public.roles where id = $1`, [id]));
       return { ok: true as const };

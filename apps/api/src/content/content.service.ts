@@ -587,6 +587,12 @@ export class ContentService {
             [itemId, statusId, pid, user.orgId],
           );
         }
+        // The roster changed, so any existing completion checkmarks for this
+        // status are stale — clear them (same "clean slate" rule changeStatus
+        // applies). Without this, removing then re-adding an assignee resurfaces
+        // their old checkmark without them actually re-reviewing, and the item
+        // can auto-advance on the remaining assignee's completion alone.
+        await c.query(`delete from public.item_status_completions where item_id = $1 and status_id = $2`, [itemId, statusId]);
         // Upsert the status's due date (null clears it).
         await c.query(
           `insert into public.item_status_due_dates (item_id, status_id, org_id, due_at)
@@ -646,14 +652,20 @@ export class ContentService {
 
   /** Rename a version (manage its label). */
   async renameVersion(user: UserContext, versionId: string, label: string) {
-    return this.db.withUser(user, async (c) => {
-      const { rowCount } = await c.query(
-        `update public.content_item_versions set label = $2 where id = $1`,
-        [versionId, label.trim() || null],
-      );
-      if (!rowCount) throw new NotFoundException('Version not found');
-      return { ok: true as const };
-    });
+    try {
+      return await this.db.withUser(user, async (c) => {
+        const { rowCount } = await c.query(
+          `update public.content_item_versions set label = $2 where id = $1`,
+          [versionId, label.trim() || null],
+        );
+        if (!rowCount) throw new NotFoundException('Version not found');
+        return { ok: true as const };
+      });
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === RLS_VIOLATION || code === FK_VIOLATION) throw new ForbiddenException('You cannot rename this version');
+      throw err;
+    }
   }
 
   /** Delete a version (RLS write policy = project membership). */
@@ -744,6 +756,17 @@ export class ContentService {
         // version (timestamp + MANUAL tag), like the reference, so the state that
         // was current before the restore stays recoverable.
         await this.snapshot(c, user, itemId, 'manual', null);
+
+        // Clear any field that was empty at snapshot time (and so has no key in
+        // it) but has since been filled in — otherwise "restore" only overwrites
+        // fields the snapshot DOES mention and silently leaves later edits to
+        // everything else in place, which isn't a real restore.
+        await c.query(
+          `delete from public.content_field_values
+            where item_id = $1
+              and field_id not in (select (jsonb_object_keys($2::jsonb))::uuid)`,
+          [itemId, JSON.stringify(v.snapshot)],
+        );
 
         // Write the version's values back (only for fields that still exist).
         await c.query(

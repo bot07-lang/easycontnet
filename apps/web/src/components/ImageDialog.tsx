@@ -26,7 +26,13 @@ function ImagePicker({
   const keyOf = (img: LinkedImage) => img.fullUrl || img.url;
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] grid place-items-start bg-black/40 p-6" onMouseDown={onClose}>
+    // z-[62] — same reasoning as CommentPopover: this is reachable from
+    // within the editor's own fullscreen view (RichTextField's z-[60]
+    // overlay), and this portal is a sibling of that overlay at the
+    // document.body level, so an EQUAL z-index only wins by DOM insertion
+    // order (currently does, but that's an accident of mount order, not a
+    // guarantee) — bump it unambiguously above instead of relying on the tie.
+    <div className="fixed inset-0 z-[62] grid place-items-start bg-black/40 p-6" onMouseDown={onClose}>
       <div className="mx-auto w-full max-w-6xl rounded-lg bg-white p-6 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
         <div className="mb-5 flex items-center justify-between">
           <h2 className="text-2xl font-semibold text-slate-900">Please select an image</h2>
@@ -156,9 +162,13 @@ export function ImageDialog({
     setUploading(true);
     try {
       const { url, fullUrl } = await onUpload(file);
-      setSrc(url);
+      // The embedded image IS the content — insert the full-size original, not
+      // the library's 250px preview (matches pickLinked below), so the probed
+      // width/height reflect the real photo too, not a downscaled thumbnail.
+      const src = fullUrl || url;
+      setSrc(src);
       setFullSrc(fullUrl);
-      probe(url);
+      probe(src);
       setTab('general');
     } finally {
       setUploading(false);

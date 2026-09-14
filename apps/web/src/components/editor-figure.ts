@@ -91,7 +91,7 @@ export const Figure = Node.create({
       // Wrap the image in a resize frame (four draggable corner handles, shown
       // only when the figure is selected). The caption stays a direct child.
       const frame = buildImageFrame(img, () => (typeof getPos === 'function' ? getPos() : undefined), editor);
-      figure.append(frame, figcaption);
+      figure.append(frame.dom, figcaption);
       return {
         dom: figure,
         contentDOM: figcaption,
@@ -100,6 +100,7 @@ export const Figure = Node.create({
           paintImg(updated); // src/size changed (rotate/edit) without recreating the caption
           return true;
         },
+        destroy: () => frame.destroy(),
       };
     };
   },

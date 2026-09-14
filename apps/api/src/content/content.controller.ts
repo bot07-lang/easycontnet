@@ -92,8 +92,13 @@ export class ContentController {
       if (!name) throw new BadRequestException('name cannot be empty');
       patch.name = name;
     }
-    if (body?.description !== undefined) patch.description = body.description;
-    if (body?.keywords !== undefined) patch.keywords = Array.isArray(body.keywords) ? body.keywords : [];
+    // Same normalization as createItem — otherwise a whitespace-only
+    // description, or blank/whitespace keyword entries, land differently
+    // depending on whether the item was created vs. later edited.
+    if (body?.description !== undefined) patch.description = body.description?.trim() || null;
+    if (body?.keywords !== undefined) {
+      patch.keywords = Array.isArray(body.keywords) ? body.keywords.map((k) => k.trim()).filter(Boolean) : [];
+    }
     if (Object.keys(patch).length === 0) throw new BadRequestException('nothing to update');
     return this.content.updateItem(user, id, patch);
   }

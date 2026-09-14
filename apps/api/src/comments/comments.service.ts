@@ -9,6 +9,7 @@ import { DatabaseService } from '../db/database.service.js';
 import type { UserContext } from '../auth/auth.guard.js';
 
 const RLS_VIOLATION = '42501';
+const CHECK_VIOLATION = '23514';
 
 export interface NewComment {
   body?: string;
@@ -54,6 +55,13 @@ export class CommentsService {
   async add(user: UserContext, itemId: string, input: NewComment) {
     const body = (input.body ?? '').trim();
     if (!body) throw new BadRequestException('Comment body is required');
+    // There's no global ValidationPipe / DTO validation in this app, so a
+    // malformed `anchor` would otherwise only be caught by the DB's `check`
+    // constraint — surfacing as an unhandled 500 instead of a clean 400.
+    const validAnchors = ['item', 'field', 'text', 'file'];
+    if (input.anchor !== undefined && !validAnchors.includes(input.anchor)) {
+      throw new BadRequestException(`anchor must be one of: ${validAnchors.join(', ')}`);
+    }
     try {
       return await this.db.withUser(user, async (c) => {
         const { rows } = await c.query(
@@ -75,9 +83,11 @@ export class CommentsService {
         return { id: rows[0].id as string };
       });
     } catch (err) {
-      if ((err as { code?: string }).code === RLS_VIOLATION) {
-        throw new ForbiddenException('You cannot comment on this item');
-      }
+      const code = (err as { code?: string }).code;
+      if (code === RLS_VIOLATION) throw new ForbiddenException('You cannot comment on this item');
+      // Defense in depth for anything the upfront check above didn't catch
+      // (e.g. a future constraint) — still a client-input problem, not a 500.
+      if (code === CHECK_VIOLATION) throw new BadRequestException('Invalid comment data');
       throw err;
     }
   }

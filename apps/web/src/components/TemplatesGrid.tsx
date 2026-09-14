@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type TemplateSummary } from '../lib/api';
+import { toast } from '../lib/toast';
 
 /**
  * The Templates grid (CONFIG → Templates): a "Create template" card followed by
@@ -99,10 +100,12 @@ function TemplateCard({
   const setDefault = useMutation({
     mutationFn: () => api.updateTemplate(t.id, { isDefault: true }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['templates', projectId] }),
+    onError: () => toast('Could not make this the default template — you may not have permission.'),
   });
   const duplicate = useMutation({
     mutationFn: () => api.duplicateTemplate(t.id),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['templates', projectId] }),
+    onError: () => toast('Could not duplicate this template — you may not have permission.'),
   });
 
   return (

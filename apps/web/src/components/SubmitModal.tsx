@@ -20,14 +20,26 @@ export function SubmitModal({
   const qc = useQueryClient();
   const [note, setNote] = useState('');
   const [sendForward, setSendForward] = useState(approval.isLastToComplete);
+  // Whether the user manually touched the checkbox — see the re-check below.
+  const [sendForwardTouched, setSendForwardTouched] = useState(false);
   const forwardOptions = approval.statuses.filter((s) => s.id !== approval.currentStatus?.id);
   const [target, setTarget] = useState(approval.nextStatusId ?? forwardOptions[0]?.id ?? '');
 
   const submit = useMutation({
-    mutationFn: () => api.submitItem(itemId, {
-      note: note.trim() || null,
-      nextStatusId: sendForward ? (target || null) : null,
-    }),
+    mutationFn: async () => {
+      // The checkbox's default (isLastToComplete) was computed when this dialog
+      // opened. If another assignee also completes this status while this stays
+      // open — completely normal with 2+ reviewers, not a tight race — that
+      // snapshot goes stale: this submit could be the true last one without the
+      // default ever reflecting it, so the item would silently never advance.
+      // Re-check right before sending, UNLESS the user manually set the
+      // checkbox themselves — their explicit choice always wins as-is.
+      const forward = sendForwardTouched ? sendForward : (await api.getApprovalInfo(itemId)).isLastToComplete;
+      return api.submitItem(itemId, {
+        note: note.trim() || null,
+        nextStatusId: forward ? (target || null) : null,
+      });
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['approval', itemId] });
       void qc.invalidateQueries({ queryKey: ['assignment', itemId] });
@@ -54,7 +66,8 @@ export function SubmitModal({
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-[15px] text-slate-800">
-            <input type="checkbox" checked={sendForward} onChange={(e) => setSendForward(e.target.checked)}
+            <input type="checkbox" checked={sendForward}
+                   onChange={(e) => { setSendForward(e.target.checked); setSendForwardTouched(true); }}
                    className="h-5 w-5 rounded accent-slate-800" />
             Send item forward to
           </label>

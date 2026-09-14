@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Editor } from '@tiptap/react';
+import { useOverflowsRight } from '../lib/overflow';
 
 /**
  * Table menu, matching the reference layout: a compact top-level list where
@@ -10,11 +11,29 @@ import type { Editor } from '@tiptap/react';
  * Every action is a Tiptap command; this component is only the menu around
  * them.
  */
+
+/** A flyout submenu panel, opening to the right of its row by default and
+ *  flipping to the left if that would run it off the viewport — measured
+ *  against its own real rendered position, not an assumed width. */
+function SubPanel({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const flip = useOverflowsRight(ref, true);
+  return (
+    <div ref={ref} className={`absolute top-0 z-40 min-w-[190px] rounded-md border
+                    border-slate-200 bg-white py-1 shadow-xl
+                    ${flip ? 'right-full -mr-1' : 'left-full -ml-1'}`}>
+      {children}
+    </div>
+  );
+}
+
 export function TableMenu({ editor }: { editor: Editor }) {
   const [open, setOpen] = useState(false);
   const [sub, setSub] = useState<null | 'table' | 'cell' | 'row' | 'column'>(null);
   const [hover, setHover] = useState({ r: 0, c: 0 });
   const ref = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const flip = useOverflowsRight(panelRef, open);
 
   useEffect(() => {
     if (!open) return;
@@ -68,13 +87,6 @@ export function TableMenu({ editor }: { editor: Editor }) {
     </button>
   );
 
-  const SubPanel = ({ children }: { children: React.ReactNode }) => (
-    <div className="absolute left-full top-0 z-40 -ml-1 min-w-[190px] rounded-md border
-                    border-slate-200 bg-white py-1 shadow-xl">
-      {children}
-    </div>
-  );
-
   return (
     <div ref={ref} className="relative">
       <button
@@ -92,8 +104,9 @@ export function TableMenu({ editor }: { editor: Editor }) {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-9 z-30 min-w-[180px] rounded-md border
-                        border-slate-200 bg-white py-1 shadow-xl">
+        <div ref={panelRef} className={`absolute top-9 z-30 min-w-[180px] rounded-md border
+                        border-slate-200 bg-white py-1 shadow-xl
+                        ${flip ? 'right-0' : 'left-0'}`}>
           {/* Table › — grid picker */}
           <Row label="Table" onHover={() => setSub('table')}>
             {sub === 'table' && (

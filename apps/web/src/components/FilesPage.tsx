@@ -296,6 +296,11 @@ function FileCard({
         </p>
         <div className="mt-2 border-t border-slate-100 pt-2">
           {file.linkedItems.length > 0 ? (
+            // The icon stays blue either way — it's just a "this file is
+            // linked" status indicator. The text only turns blue/underline
+            // when it's a REAL link (single item, clickable to jump there);
+            // with multiple items there's nowhere single to jump to, so it
+            // reads as plain text instead of looking like a dead link.
             <div className="flex items-center gap-1.5 text-[13px] text-blue-600">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
                 <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" />
@@ -306,7 +311,7 @@ function FileCard({
                   {file.linkedItems[0]!.name}
                 </button>
               ) : (
-                <span className="truncate" title={file.linkedItems.map((i) => i.name).join(', ')}>
+                <span className="truncate text-slate-500" title={file.linkedItems.map((i) => i.name).join(', ')}>
                   Linked to {file.linkedItems.length} items
                 </span>
               )}

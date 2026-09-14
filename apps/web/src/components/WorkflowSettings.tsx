@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type WorkflowConfig, type WorkflowStatus, type WorkflowRating } from '../lib/api';
+import { toast } from '../lib/toast';
 
 /**
  * The per-project Workflow settings page (CONFIG → Workflow). Mirrors the
@@ -71,7 +72,11 @@ function StatusSection({ projectId, data }: { projectId: string; data: WorkflowC
               <th className="border-b border-slate-200 px-3 py-3 text-left font-semibold">Status</th>
               {roles.map((r) => (
                 <th key={r.id} title={r.name} className="border-b border-l border-slate-200 px-2 py-3 text-center font-medium">
-                  <span className="block max-w-[52px] truncate">{r.name}</span>
+                  {/* Wide enough for most role names outright ("Subject Matter
+                      Expert" fits); the table's own overflow-x-auto still
+                      catches anything longer instead of relying on a hover
+                      tooltip to read a column header that's on-screen. */}
+                  <span className="block max-w-[160px] truncate">{r.name}</span>
                 </th>
               ))}
               <th className="border-b border-slate-200 px-3 py-3 text-left font-medium">
@@ -229,6 +234,7 @@ function StatusEditRow({
       }
     },
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['workflow', projectId] }); onDone(); },
+    onError: () => toast('Could not save this status — you may not have permission.'),
   });
 
   const toggle = (set: Set<string>, id: string, apply: (s: Set<string>) => void) => {
@@ -411,6 +417,7 @@ function RatingDisplayRow({
   const del = useMutation({
     mutationFn: () => api.deleteRating(r.id),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['workflow', projectId] }),
+    onError: () => toast('Could not delete this rating — you may not have permission.'),
   });
   useEffect(() => {
     if (!menu) return;
@@ -480,6 +487,7 @@ function RatingEditRow({
       }
     },
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['workflow', projectId] }); onDone(); },
+    onError: () => toast('Could not save this rating — you may not have permission.'),
   });
 
   return (

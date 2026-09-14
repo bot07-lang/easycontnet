@@ -9,17 +9,23 @@ import {
   Patch,
   Post,
   Put,
+  UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import { RequirePermission } from '../access/require-permission.decorator.js';
-import type { UserContext } from '../auth/auth.guard.js';
+import { AuthGuard, type UserContext } from '../auth/auth.guard.js';
 import { RolesService } from './roles.service.js';
 
 /**
  * Roles & Permissions management. Every route requires the `manage_roles`
  * permission (checked by the guard here AND enforced independently by RLS).
+ *
+ * AuthGuard applied here at the class level (RequirePermission no longer
+ * bundles it) — every route below also carries @RequirePermission, so this is
+ * the only guard that populates `req.user` for them.
  */
 @Controller()
+@UseGuards(AuthGuard)
 export class RolesController {
   constructor(@Inject(RolesService) private readonly roles: RolesService) {}
 

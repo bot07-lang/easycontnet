@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { toast } from '../lib/toast';
 
 /**
  * "Create new content item" dialog: a title, and a starting structure —
@@ -47,6 +48,7 @@ export function CreateItemDialog({
       void qc.invalidateQueries({ queryKey: ['dashboard'] });
       onCreated(res.id);
     },
+    onError: () => toast('Could not create this item — you may not have permission.'),
   });
 
   return (

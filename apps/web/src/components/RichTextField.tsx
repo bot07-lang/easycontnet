@@ -9,7 +9,13 @@ import Image from '@tiptap/extension-image';
 // The default Image node only carries src/alt/title. Extend it so the
 // Insert/Edit Image dialog can set width and height, and so a library image
 // dragged into content keeps a `data-full-name` reference to its full-size
-// original (src holds the lightweight thumbnail) — matching the reference.
+// original. `src` is ALSO the full-size original — an inline image in the
+// article body is the actual content, not a picker thumbnail, so it must not
+// be capped at the library's 250px preview size (that cap is only correct for
+// small UI like the Files grid/file cards). `data-full-name` is redundant with
+// `src` today but stays: the image-edit tool (rotate/crop) reads it as the
+// authoritative source to fetch, and older content saved before this fix may
+// still have a real thumbnail in `src` with the original only in this attribute.
 const SizedImage = Image.extend({
   addAttributes() {
     return {
@@ -40,14 +46,15 @@ const SizedImage = Image.extend({
         }
       };
       paint(node);
-      const dom = buildImageFrame(img, () => (typeof getPos === 'function' ? getPos() : undefined), editor);
+      const frame = buildImageFrame(img, () => (typeof getPos === 'function' ? getPos() : undefined), editor);
       return {
-        dom,
+        dom: frame.dom,
         update: (updated) => {
           if (updated.type.name !== 'image') return false;
           paint(updated);
           return true;
         },
+        destroy: () => frame.destroy(),
       };
     };
   },
@@ -75,7 +82,9 @@ import Placeholder from '@tiptap/extension-placeholder';
 import Superscript from '@tiptap/extension-superscript';
 import Subscript from '@tiptap/extension-subscript';
 import FontFamily from '@tiptap/extension-font-family';
-import { FontSize, LineHeight, Div, Indent } from './editor-extensions';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import { FontSize, LineHeight, Div, Indent, GenericEmbed, embedNodeView } from './editor-extensions';
 import { Figure } from './editor-figure';
 import { TableWithProps, type TableProps } from './editor-table-props';
 import { TablePropsDialog } from './TablePropsDialog';
@@ -176,12 +185,19 @@ export function RichTextField({
       Indent,
       Superscript,
       Subscript,
+      TaskList,
+      TaskItem.configure({ nested: true }),
       Highlight.configure({ multicolor: true }),
       TableWithProps.configure({ resizable: true }),
       TableRow,
       TableHeader,
       TableCell,
-      Youtube.configure({ controls: true, nocookie: true }),
+      // A YouTube iframe is a separate document, so clicking it almost never
+      // reaches ProseMirror to select the node — Backspace/Delete then has
+      // nothing to act on. addNodeView layers a real "delete" button above
+      // the iframe (see embedNodeView's doc comment) so it's always removable.
+      Youtube.extend({ addNodeView: () => embedNodeView }).configure({ controls: true, nocookie: true }),
+      GenericEmbed,
       KeywordHighlight,
     ],
     content: value,
@@ -213,9 +229,12 @@ export function RichTextField({
         if (!imageType || !paraType) return false;
         event.preventDefault();
         const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos ?? view.state.selection.from;
-        // src = lightweight thumbnail; data-full-name = the original (full-size).
-        // The image is inline, so drop it inside its own paragraph → its own line.
-        const img = imageType.create({ src: data.url, alt: data.name ?? '', dataFullName: data.fullName ?? null });
+        // src = the full-size original (fullName), so the embedded image isn't
+        // capped at the library's 250px preview; data-full-name mirrors it for
+        // the edit tool. The image is inline, so drop it inside its own
+        // paragraph → its own line.
+        const src = data.fullName || data.url || '';
+        const img = imageType.create({ src, alt: data.name ?? '', dataFullName: data.fullName ?? null });
         view.dispatch(view.state.tr.insert(at, paraType.create(null, img)));
         return true;
       },
@@ -238,7 +257,7 @@ export function RichTextField({
             const imageType = view.state.schema.nodes.image;
             const paraType = view.state.schema.nodes.paragraph;
             if (imageType && paraType) {
-              const img = imageType.create({ src: lib.url ?? lib.fullUrl ?? '', alt: '', dataFullName: lib.fullUrl });
+              const img = imageType.create({ src: lib.fullUrl ?? lib.url ?? '', alt: '', dataFullName: lib.fullUrl });
               // Inline image in its own paragraph → its own line, not inline with text.
               view.dispatch(view.state.tr.replaceSelectionWith(paraType.create(null, img)));
             }
@@ -306,10 +325,11 @@ export function RichTextField({
   };
 
   // Point the selected image/figure at the freshly-uploaded (rotated/edited)
-  // derived image: src → its thumbnail, data-full-name → the full-size. Derived
-  // images aren't added to the Files library (only originals show there).
+  // derived image: src → the full-size result (not the 250px preview), data-
+  // full-name mirrors it. Derived images aren't added to the Files library
+  // (only originals show there).
   const applyNewFile = (img: DerivedImage) => {
-    const newSrc = img.url || img.fullUrl || '';
+    const newSrc = img.fullUrl || img.url || '';
     const type = editor.isActive('figure') ? 'figure' : 'image';
     const swap = () => {
       editor.chain().focus().updateAttributes(type, { src: newSrc, dataFullName: img.fullUrl || null, width: null, height: null }).run();
@@ -387,6 +407,17 @@ export function RichTextField({
     .filter((f) => (f.mime ?? '').startsWith('image/') && f.fullUrl
       && !!itemId && f.linkedItems.some((li) => li.id === itemId))
     .map((f) => ({ url: f.url ?? f.fullUrl!, fullUrl: f.fullUrl!, name: f.name, uploadedAt: f.createdAt, sizeBytes: f.sizeBytes }));
+
+  // Files LINKED to the current content item — offered in the Insert/Edit Link
+  // dialog's "Browse files" picker (any type, not just images: a link can point
+  // at a PDF, a doc, anything attached here), same scoping as linkedImages above.
+  const linkedFiles = (filesQuery.data ?? [])
+    .filter((f) => f.fullUrl && !!itemId && f.linkedItems.some((li) => li.id === itemId))
+    .map((f) => ({
+      url: f.fullUrl!, name: f.name, mime: f.mime,
+      thumbUrl: (f.mime ?? '').startsWith('image/') ? (f.url ?? f.fullUrl!) : null,
+      uploadedAt: f.createdAt, sizeBytes: f.sizeBytes,
+    }));
 
   // The wrapping <figure> node (if the cursor is inside one) and its position.
   const findFigure = () => {
@@ -467,9 +498,13 @@ export function RichTextField({
           reference becomes the stable .rt-body div). Tippy portals the menus, so
           this reorder does not change what the user sees. */}
 
-      {/* Floating toolbar over a selected image: rotate ×2 · Edit Image · Insert/Edit.
-          Low z-index (40) so any dialog/editor (z-50+) covers it instead of it
-          floating on top; kept mounted so the buttons stay reliably clickable. */}
+      {/* Floating toolbar over a selected image: rotate ×2 · Edit Image ·
+          Insert/Edit · Delete. Low z-index (40) so any dialog/editor (z-50+)
+          covers it instead of it floating on top; kept mounted so the buttons
+          stay reliably clickable. Deleting is also just Backspace/Delete on
+          the keyboard once the image is selected, but that's not discoverable —
+          this button is the only visible way to remove an image, matching the
+          table bubble menu's own "Delete table" button below. */}
       <BubbleMenu
         editor={editor}
         pluginKey={`image-bubble-${bubbleKey}`}
@@ -489,6 +524,10 @@ export function RichTextField({
           </ImgBtn>
           <ImgBtn title="Insert/edit image" onClick={openImgDialog}>
             <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-5-5L5 21" />
+          </ImgBtn>
+          <span className="mx-1 h-6 w-px bg-slate-200" />
+          <ImgBtn title="Delete image" onClick={() => editor.chain().focus().deleteSelection().run()}>
+            <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" />
           </ImgBtn>
         </div>
       </BubbleMenu>
@@ -543,6 +582,7 @@ export function RichTextField({
         onToggleFullscreen={() => setFullscreen((v) => !v)}
         onUpload={uploadForDialog}
         linkedImages={linkedImages}
+        linkedFiles={linkedFiles}
         disabled={!editable}
         fieldId={fieldId}
       />

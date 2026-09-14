@@ -18,9 +18,10 @@ export async function uploadLibraryFile(projectId: string, blob: Blob, name: str
 }
 
 export interface DerivedImage {
-  /** 250px thumbnail URL for inline display. */
+  /** 250px preview URL — for small UI (e.g. a file card), NOT for embedding in
+   *  content; callers must use `fullUrl` as the inline image's actual `src`. */
   url: string;
-  /** Original (full-size) URL — kept as the inline image's data-full-name. */
+  /** Original (full-size) URL — the inline image's real `src` and its data-full-name. */
   fullUrl: string;
 }
 

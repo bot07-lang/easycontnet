@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { fileURLToPath } from 'node:url';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { DatabaseModule } from './db/database.module.js';
+import { AuthModule } from './auth/auth.module.js';
 import { AccessModule } from './access/access.module.js';
 import { ContentModule } from './content/content.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
@@ -32,7 +33,7 @@ const staticImports =
 @Module({
   imports: [
     ...staticImports,
-    DatabaseModule, AccessModule, ContentModule, ProjectsModule,
+    DatabaseModule, AuthModule, AccessModule, ContentModule, ProjectsModule,
     DashboardModule, WorkflowModule, TemplatesModule, FilesModule, RolesModule, CommentsModule,
   ],
 })

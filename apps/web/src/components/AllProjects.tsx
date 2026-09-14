@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type DashboardProject, type DashboardMyItem } from '../lib/api';
 import { CreateProjectDialog } from './CreateProjectDialog';
+import { toast } from '../lib/toast';
 
 type SortKey = 'created' | 'active' | 'name' | 'items' | 'overdue';
 const SORTS: { key: SortKey; label: string }[] = [
@@ -39,7 +40,6 @@ export function AllProjects({
       <section>
         <div className="mb-3 flex items-baseline gap-3">
           <h2 className="text-lg font-semibold text-slate-900">My Items</h2>
-          <span className="text-sm text-slate-400">Items assigned to you will appear here</span>
         </div>
         {data.myItems.length === 0 ? (
           <p className="rounded-lg border border-dashed border-slate-300 bg-white px-5 py-10 text-center text-sm text-slate-400">
@@ -344,12 +344,14 @@ function CardActions({ project }: { project: DashboardProject }) {
 
   // Refresh both the active and archived lists — a project can move between them.
   const refresh = () => qc.invalidateQueries({ queryKey: ['dashboard'] });
-  const archive = useMutation({ mutationFn: () => api.archiveProject(project.id), onSuccess: refresh });
-  const restore = useMutation({ mutationFn: () => api.restoreProject(project.id), onSuccess: refresh });
-  const duplicate = useMutation({ mutationFn: () => api.duplicateProject(project.id), onSuccess: refresh });
+  const onError = (action: string) => () => toast(`Could not ${action} this project — you may not have permission.`);
+  const archive = useMutation({ mutationFn: () => api.archiveProject(project.id), onSuccess: refresh, onError: onError('archive') });
+  const restore = useMutation({ mutationFn: () => api.restoreProject(project.id), onSuccess: refresh, onError: onError('restore') });
+  const duplicate = useMutation({ mutationFn: () => api.duplicateProject(project.id), onSuccess: refresh, onError: onError('duplicate') });
   const del = useMutation({
     mutationFn: () => api.deleteProject(project.id),
     onSuccess: () => { setConfirmDelete(false); refresh(); },
+    onError: onError('delete'),
   });
 
   const Item = ({ label, danger, onClick }: { label: string; danger?: boolean; onClick: () => void }) => (

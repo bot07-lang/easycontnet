@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type TemplateDetail, type TemplateField, type TemplateTab } from '../lib/api';
+import { useOverflowsRight } from '../lib/overflow';
 import { Modal, inputClass } from './Modal';
+import { toast } from '../lib/toast';
 
 /* ---------------------------------------------------- field-type metadata */
 
@@ -88,8 +90,16 @@ function Header({ template: t, onBack, onRenamed, onOpenTemplate }: { template: 
   const [deleting, setDeleting] = useState(false);
 
   const refreshList = () => qc.invalidateQueries({ queryKey: ['templates', t.projectId] });
-  const setDefault = useMutation({ mutationFn: () => api.updateTemplate(t.id, { isDefault: true }), onSuccess: () => { onRenamed(); refreshList(); } });
-  const duplicate = useMutation({ mutationFn: () => api.duplicateTemplate(t.id), onSuccess: (res) => { refreshList(); onOpenTemplate?.(res.id); } });
+  const setDefault = useMutation({
+    mutationFn: () => api.updateTemplate(t.id, { isDefault: true }),
+    onSuccess: () => { onRenamed(); refreshList(); },
+    onError: () => toast('Could not make this the default template — you may not have permission.'),
+  });
+  const duplicate = useMutation({
+    mutationFn: () => api.duplicateTemplate(t.id),
+    onSuccess: (res) => { refreshList(); onOpenTemplate?.(res.id); },
+    onError: () => toast('Could not duplicate this template — you may not have permission.'),
+  });
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -157,7 +167,11 @@ const MenuIcons = {
 function CreateTemplateModal({ projectId, onClose, onCreated }: { projectId: string; onClose: () => void; onCreated: (id: string) => void }) {
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
-  const create = useMutation({ mutationFn: () => api.createTemplate(projectId, name.trim(), desc.trim() || null), onSuccess: (res) => onCreated(res.id) });
+  const create = useMutation({
+    mutationFn: () => api.createTemplate(projectId, name.trim(), desc.trim() || null),
+    onSuccess: (res) => onCreated(res.id),
+    onError: () => toast('Could not create this template — you may not have permission.'),
+  });
   return (
     <Modal title="Create template" onClose={onClose} width={460}
            footer={<>
@@ -186,7 +200,11 @@ function CloneTemplateModal({ templateId, templateName, projectId, onClose }: { 
   const [targetId, setTargetId] = useState('');
   if (!targetId && targets.length) setTargetId(targets[0]!.id);
   const [done, setDone] = useState(false);
-  const clone = useMutation({ mutationFn: () => api.cloneTemplateToProject(templateId, targetId), onSuccess: (res) => { void qc.invalidateQueries({ queryKey: ['templates', res.projectId] }); setDone(true); } });
+  const clone = useMutation({
+    mutationFn: () => api.cloneTemplateToProject(templateId, targetId),
+    onSuccess: (res) => { void qc.invalidateQueries({ queryKey: ['templates', res.projectId] }); setDone(true); },
+    onError: () => toast('Could not clone this template to that project — you may not have permission.'),
+  });
   const targetName = targets.find((p) => p.id === targetId)?.name;
   return (
     <Modal title="Clone into another project" onClose={onClose} width={460}
@@ -215,7 +233,11 @@ function CloneTemplateModal({ templateId, templateName, projectId, onClose }: { 
 }
 
 function DeleteTemplateModal({ templateId, templateName, onClose, onDeleted }: { templateId: string; templateName: string; onClose: () => void; onDeleted: () => void }) {
-  const del = useMutation({ mutationFn: () => api.deleteTemplate(templateId), onSuccess: onDeleted });
+  const del = useMutation({
+    mutationFn: () => api.deleteTemplate(templateId),
+    onSuccess: onDeleted,
+    onError: () => toast('Could not delete this template — you may not have permission.'),
+  });
   return (
     <Modal title="Delete template?" onClose={onClose} width={440}
            footer={<>
@@ -244,6 +266,7 @@ function TabBar({
   const create = useMutation({
     mutationFn: () => api.createTab(t.id, newName.trim()),
     onSuccess: () => { setAdding(false); setNewName(''); onChanged(); },
+    onError: () => toast('Could not create this tab — you may not have permission.'),
   });
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 px-3 pt-3">
@@ -276,10 +299,29 @@ function TabPill({ tab, active, onSelect, onChanged }: { tab: TemplateTab; activ
   const [name, setName] = useState(tab.name);
   const ref = useRef<HTMLDivElement>(null);
   useOutside(ref, () => setMenu(false), menu);
+  // Tabs wrap left-to-right and fill the row, so a tab near the right edge
+  // would otherwise have its "⋮" menu run off the panel (or the panel's own
+  // clipping ancestor) — measured against its real rendered position, not an
+  // assumed width, since which tab ends up there (and how much room it has)
+  // varies.
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuFlip = useOverflowsRight(menuRef, menu);
 
-  const rename = useMutation({ mutationFn: () => api.updateTab(tab.id, { name: name.trim() }), onSuccess: () => { setRenaming(false); onChanged(); } });
-  const toggleHide = useMutation({ mutationFn: () => api.updateTab(tab.id, { isHidden: !tab.isHidden }), onSuccess: () => { setMenu(false); onChanged(); } });
-  const del = useMutation({ mutationFn: () => api.deleteTab(tab.id), onSuccess: () => { setMenu(false); onChanged(); } });
+  const rename = useMutation({
+    mutationFn: () => api.updateTab(tab.id, { name: name.trim() }),
+    onSuccess: () => { setRenaming(false); onChanged(); },
+    onError: () => toast('Could not rename this tab — you may not have permission.'),
+  });
+  const toggleHide = useMutation({
+    mutationFn: () => api.updateTab(tab.id, { isHidden: !tab.isHidden }),
+    onSuccess: () => { setMenu(false); onChanged(); },
+    onError: () => toast('Could not change this tab’s visibility — you may not have permission.'),
+  });
+  const del = useMutation({
+    mutationFn: () => api.deleteTab(tab.id),
+    onSuccess: () => { setMenu(false); onChanged(); },
+    onError: () => toast('Could not delete this tab — you may not have permission.'),
+  });
 
   if (renaming) {
     return (
@@ -303,7 +345,7 @@ function TabPill({ tab, active, onSelect, onChanged }: { tab: TemplateTab; activ
         </button>
       </div>
       {menu && (
-        <div className="absolute left-0 z-30 mt-1 w-40 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl">
+        <div ref={menuRef} className={`absolute z-30 mt-1 w-40 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl ${menuFlip ? 'right-0' : 'left-0'}`}>
           <button type="button" onClick={() => { setMenu(false); setRenaming(true); }} className="flex w-full items-center gap-2.5 px-4 py-2 text-left text-[14px] text-slate-700 hover:bg-slate-50">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg> Rename
           </button>
@@ -367,8 +409,16 @@ function FieldCard({ field, isFirst, isLast, onStructuralChange }: { field: Temp
   const { draft, set } = useFieldSave(field);
   const [confirmDel, setConfirmDel] = useState(false);
 
-  const move = useMutation({ mutationFn: (dir: 'up' | 'down') => api.moveField(field.id, dir), onSuccess: onStructuralChange });
-  const del = useMutation({ mutationFn: () => api.deleteField(field.id), onSuccess: () => { setConfirmDel(false); onStructuralChange(); } });
+  const move = useMutation({
+    mutationFn: (dir: 'up' | 'down') => api.moveField(field.id, dir),
+    onSuccess: onStructuralChange,
+    onError: () => toast('Could not move this field — you may not have permission.'),
+  });
+  const del = useMutation({
+    mutationFn: () => api.deleteField(field.id),
+    onSuccess: () => { setConfirmDel(false); onStructuralChange(); },
+    onError: () => toast('Could not delete this field — you may not have permission.'),
+  });
 
   const system = field.isSystem;
   const isParagraph = field.type === 'paragraph_text';
@@ -549,7 +599,11 @@ function AddFieldButton({ tabId, onAdded }: { tabId: string; onAdded: () => void
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useOutside(ref, () => setOpen(false), open);
-  const add = useMutation({ mutationFn: (type: string) => api.createField(tabId, type), onSuccess: () => { setOpen(false); onAdded(); } });
+  const add = useMutation({
+    mutationFn: (type: string) => api.createField(tabId, type),
+    onSuccess: () => { setOpen(false); onAdded(); },
+    onError: () => toast('Could not add this field — you may not have permission.'),
+  });
   return (
     <div ref={ref} className="relative inline-block">
       <button type="button" onClick={() => setOpen((v) => !v)}

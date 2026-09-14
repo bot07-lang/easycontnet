@@ -9,18 +9,25 @@ const CORNERS: Corner[] = ['nw', 'ne', 'sw', 'se'];
  * new width/height to the node's attributes; the handles only appear when the
  * node is selected (CSS keys off `.ProseMirror-selectednode` / figure focus).
  *
- * Returns the wrapper element — append it to the node view and put the img inside.
- * `getPos`/`editor`/`typeName` let a drag write back to the right node.
+ * Returns the wrapper element plus a `destroy` hook — call it from the node
+ * view's own `destroy()` so a drag left in progress when the node is removed
+ * (image deleted mid-drag, undo, or the editor unmounting) doesn't leave its
+ * document-level mousemove/mouseup listeners dangling to later fire against a
+ * stale position or a torn-down editor view.
  */
 export function buildImageFrame(
   img: HTMLImageElement,
   getPos: () => number | undefined,
   editor: Editor,
-): HTMLElement {
+): { dom: HTMLElement; destroy: () => void } {
   const wrap = document.createElement('span');
   wrap.className = 'cw-img-wrap';
   wrap.contentEditable = 'false';
   wrap.appendChild(img);
+
+  // At most one drag is ever in progress for this frame; tracked so `destroy`
+  // can tear it down if the node view goes away mid-drag.
+  let activeCleanup: (() => void) | null = null;
 
   for (const corner of CORNERS) {
     const handle = document.createElement('span');
@@ -40,9 +47,13 @@ export function buildImageFrame(
         img.style.width = `${w}px`;
         img.style.height = 'auto';
       };
-      const onUp = () => {
+      const cleanup = () => {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
+        activeCleanup = null;
+      };
+      const onUp = () => {
+        cleanup();
         const w = Math.round(img.getBoundingClientRect().width);
         const h = Math.round(w / (ratio || 1));
         img.style.width = '';
@@ -54,11 +65,12 @@ export function buildImageFrame(
         if (!node) return;
         dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, width: String(w), height: String(h) }));
       };
+      activeCleanup = cleanup;
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
     wrap.appendChild(handle);
   }
 
-  return wrap;
+  return { dom: wrap, destroy: () => activeCleanup?.() };
 }

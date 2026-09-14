@@ -143,10 +143,19 @@ function Workspace() {
   const [openTemplateId, setOpenTemplateId] = useState<string | null>(() => url0.get('template'));
 
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.listProjects });
+  const me = useQuery({ queryKey: ['me'], queryFn: api.me });
 
   // Default the dropdown to the first visible project once loaded (unless the URL
   // already pinned one).
   if (!projectId && projects.data?.length) setProjectId(projects.data[0]!.id);
+
+  // A nav item the sidebar hides for this user (e.g. Files without
+  // manage_asset_library) shouldn't stay reachable via a stale/typed URL.
+  useEffect(() => {
+    if (nav === 'files' && me.data && !me.data.isOwner && !me.data.permissions.includes('manage_asset_library')) {
+      setNav('content');
+    }
+  }, [nav, me.data]);
 
   // Keep the URL in sync with the view (replaceState, so it doesn't spam history)
   // so a reload restores the same project / item / tab.
@@ -194,6 +203,7 @@ function Workspace() {
       <Sidebar
         selectedProjectId={projectId}
         activeNav={showAll ? null : nav}
+        me={me.data}
         onAllProjects={() => { setShowAll(true); setItemId(null); }}
         onSelectProject={switchProject}
         onNavigate={(key) => { setShowAll(false); setNav(key); setItemId(null); }}
@@ -252,7 +262,7 @@ function ProjectView({
     return (
       <div className="h-full overflow-y-auto p-6">
         <Suspense fallback={<LazyFallback />}>
-          <CategoriesPage projectId={projectId} />
+          <CategoriesPage key={projectId} projectId={projectId} />
         </Suspense>
       </div>
     );

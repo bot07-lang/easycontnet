@@ -17,12 +17,15 @@ import { RequirePermission } from '../access/require-permission.decorator.js';
 import { DatabaseService } from '../db/database.service.js';
 import { DEFAULT_WORKFLOW } from '@content/shared';
 
+// AuthGuard applied at the class level — RequirePermission no longer bundles
+// it, so this is the only guard populating `req.user` for the @RequirePermission
+// routes below (they have no other auth coverage of their own).
 @Controller('projects')
+@UseGuards(AuthGuard)
 class ProjectsController {
   constructor(@Inject(DatabaseService) private readonly db: DatabaseService) {}
 
   @Get()
-  @UseGuards(AuthGuard)
   list(@CurrentUser() user: UserContext) {
     return this.db.withUser(user, async (c) => {
       const { rows } = await c.query(

@@ -20,8 +20,12 @@ type Callbacks = {
   onSaved?: () => void;
 };
 
-// One retry chain per (item, field). `token` lets a newer save cancel an older one.
-const chains = new Map<string, { timer?: ReturnType<typeof setTimeout>; token: number }>();
+// One retry chain per (item, field). `token` lets a newer save's callbacks
+// ignore a stale one; `controller` actually cancels its in-flight HTTP request
+// so an older save can never land on the server after a newer one (which
+// would otherwise silently overwrite it — the token only gated client-side
+// handling, not server write order).
+const chains = new Map<string, { timer?: ReturnType<typeof setTimeout>; token: number; controller?: AbortController }>();
 let tokenSeq = 0;
 
 const memKey = (itemId: string, fieldId: string) => `${itemId}::${fieldId}`;
@@ -52,14 +56,16 @@ export function saveField(itemId: string, fieldId: string, value: unknown, cb?: 
   const k = memKey(itemId, fieldId);
   const prev = chains.get(k);
   if (prev?.timer) clearTimeout(prev.timer);
+  prev?.controller?.abort(); // cancel any in-flight request for this field — it must not land after ours
   const token = ++tokenSeq;
-  chains.set(k, { token });
+  const controller = new AbortController();
+  chains.set(k, { token, controller });
 
   stash(itemId, fieldId, value); // recoverable from the very first attempt
   cb?.onStatus?.('saving');
 
   const attempt = (n: number) => {
-    api.saveField(itemId, fieldId, value).then(
+    api.saveField(itemId, fieldId, value, controller.signal).then(
       () => {
         if (chains.get(k)?.token !== token) return; // superseded by a newer save
         chains.delete(k);
@@ -68,7 +74,7 @@ export function saveField(itemId: string, fieldId: string, value: unknown, cb?: 
         cb?.onStatus?.('saved');
       },
       (err: unknown) => {
-        if (chains.get(k)?.token !== token) return; // superseded
+        if (chains.get(k)?.token !== token) return; // superseded (includes our own abort())
         // 401/403 won't be fixed by retrying (no edit access); stop early.
         const permanent = err instanceof Error && /^40[13]:/.test(err.message);
         if (permanent || n >= MAX_ATTEMPTS) {
@@ -80,7 +86,7 @@ export function saveField(itemId: string, fieldId: string, value: unknown, cb?: 
         cb?.onStatus?.('retrying');
         const delay = BASE_DELAY_MS * 2 ** (n - 1) + Math.floor(Math.random() * 400); // jitter
         const timer = setTimeout(() => attempt(n + 1), delay);
-        chains.set(k, { timer, token });
+        chains.set(k, { timer, token, controller });
       },
     );
   };
@@ -99,11 +105,13 @@ export async function flushField(itemId: string, fieldId: string, value: unknown
   const k = memKey(itemId, fieldId);
   const prev = chains.get(k);
   if (prev?.timer) clearTimeout(prev.timer);
+  prev?.controller?.abort(); // cancel any in-flight request for this field — it must not land after ours
   const token = ++tokenSeq;
-  chains.set(k, { token });
+  const controller = new AbortController();
+  chains.set(k, { token, controller });
   stash(itemId, fieldId, value);
   try {
-    await api.saveField(itemId, fieldId, value);
+    await api.saveField(itemId, fieldId, value, controller.signal);
     if (chains.get(k)?.token === token) { chains.delete(k); unstash(itemId, fieldId); }
     return true;
   } catch {
@@ -120,7 +128,15 @@ export function recoverPending(itemId: string): { fieldId: string; value: unknow
       const key = localStorage.key(i);
       if (!key || !key.startsWith(prefix)) continue;
       const raw = localStorage.getItem(key);
-      if (raw != null) out.push({ fieldId: key.slice(prefix.length), value: JSON.parse(raw) });
+      if (raw == null) continue;
+      // One field's stash being malformed (partial write, stale schema from an
+      // older app version) must not abort recovery of every other field — skip
+      // just that entry instead of losing the whole loop to one bad JSON.parse.
+      try {
+        out.push({ fieldId: key.slice(prefix.length), value: JSON.parse(raw) });
+      } catch {
+        /* corrupted entry — drop it, nothing to recover from it anyway */
+      }
     }
   } catch {
     /* ignore */

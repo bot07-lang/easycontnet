@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type OrgUser } from '../lib/api';
+import { toast } from '../lib/toast';
 
 /**
  * Create-a-new-project dialog: a required name and an optional multi-select of
@@ -28,6 +29,7 @@ export function CreateProjectDialog({
       void qc.invalidateQueries({ queryKey: ['dashboard'] });
       onCreated(res.id);
     },
+    onError: () => toast('Could not create this project — you may not have permission.'),
   });
 
   useEffect(() => {

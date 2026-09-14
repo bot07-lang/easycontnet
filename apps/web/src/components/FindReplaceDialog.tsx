@@ -25,7 +25,13 @@ export function FindReplaceDialog({ editor, onClose }: { editor: Editor; onClose
         let i = hay.indexOf(needle);
         while (i !== -1) {
           matches.push({ from: pos + i, to: pos + i + term.length });
-          i = hay.indexOf(needle, i + 1);
+          // Advance past the WHOLE match, not just one character, so a
+          // self-overlapping needle (e.g. "aa" in "aaaa") yields the correct
+          // non-overlapping matches. Overlapping matches broke replaceAll's
+          // back-to-front replacement, which assumes replacing a later match
+          // never shifts an earlier one's positions — true only when matches
+          // don't overlap.
+          i = hay.indexOf(needle, i + needle.length);
         }
       }
       return true;

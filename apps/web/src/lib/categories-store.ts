@@ -9,16 +9,30 @@ import { useSyncExternalStore } from 'react';
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach((l) => l());
 
+// useSyncExternalStore (below) requires getSnapshot to return the SAME
+// reference across calls until something actually changed — otherwise it
+// looks like a change on every render, which React either warns about or,
+// worse, spins on. localStorage has no such notion of identity (every read is
+// a fresh JSON.parse), so this cache is what gives `read` that stability: it
+// keeps returning the array it handed out last time until `write` replaces it.
+const cache = new Map<string, string[]>();
+
 function read(key: string): string[] {
+  const cached = cache.get(key);
+  if (cached) return cached;
+  let value: string[];
   try {
     const v = JSON.parse(localStorage.getItem(key) ?? '[]');
-    return Array.isArray(v) ? (v as string[]) : [];
+    value = Array.isArray(v) ? (v as string[]) : [];
   } catch {
-    return [];
+    value = [];
   }
+  cache.set(key, value);
+  return value;
 }
 function write(key: string, value: string[]) {
   localStorage.setItem(key, JSON.stringify(value));
+  cache.set(key, value);
   notify();
 }
 

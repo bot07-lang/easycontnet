@@ -100,9 +100,13 @@ function sortValue(it: ItemSummary, key: SortKey): string | number | null {
     case 'people': return it.people.length;
     case 'due': return it.next_due_date ? new Date(it.next_due_date).getTime() : null;
     case 'template': return it.template_name?.toLowerCase() ?? null;
-    case 'lastUpdated':
-    case 'timeInStatus': return new Date(it.updated_at).getTime();
-    default: return null; // categories, tags — not populated yet
+    case 'lastUpdated': return new Date(it.updated_at).getTime();
+    // timeInStatus has no backing data (no per-status-entry timestamp is
+    // tracked) — it used to fall through to updated_at, which silently
+    // resorted the list by "last updated" under the wrong column label.
+    // null makes clicking it an inert no-op, like the other not-yet-
+    // implemented columns below.
+    default: return null; // categories, tags, timeInStatus — not populated yet
   }
 }
 
@@ -706,6 +710,7 @@ function TitleCell({ projectId, item, onOpen }: { projectId: string; item: ItemS
   const rename = useMutation({
     mutationFn: () => api.renameItem(item.id, name.trim()),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ['items', projectId] }); setEditing(false); },
+    onError: () => toast('Could not rename this item — you may not have permission.'),
   });
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 
@@ -831,6 +836,7 @@ function RowActions({
       setConfirm(false);
       setOpen(false);
     },
+    onError: () => toast('Could not delete this item — you may not have permission.'),
   });
 
   const stop = (e: React.MouseEvent) => e.stopPropagation();
@@ -1092,6 +1098,7 @@ function ChangeStatusDialog({ projectId, item, onClose }: { projectId: string; i
       void qc.invalidateQueries({ queryKey: ['dashboard'] });
       onClose();
     },
+    onError: () => toast('Could not change this item’s status — you may not have permission.'),
   });
 
   return (

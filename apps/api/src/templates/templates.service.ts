@@ -114,6 +114,14 @@ export class TemplatesService {
    * Create a template, provisioned with a "Main Content" system tab holding a
    * Title and a Content field — the minimum a content item needs, matching item
    * auto-provisioning. The first template in a project becomes the default.
+   *
+   * The "is it the first one" check and the insert are two separate statements,
+   * so two concurrent creates in a brand-new project can both see count === 0
+   * and both try to insert as default. The DB's `templates_one_default_per_project`
+   * partial unique index is the real guard against that (only one can win) — the
+   * loser's insert fails with a unique violation on that index specifically, and
+   * we retry it once as non-default instead of surfacing an error for what is
+   * otherwise a perfectly valid create.
    */
   async createTemplate(user: UserContext, projectId: string, name: string, description?: string | null) {
     try {
@@ -123,13 +131,28 @@ export class TemplatesService {
             .rows[0].count,
         );
 
-        const templateId = (
-          await c.query(
+        const insert = (isDefault: boolean) =>
+          c.query(
             `insert into public.templates (org_id, project_id, name, description, is_default)
              values ($1, $2, $3, $4, $5) returning id`,
-            [user.orgId, projectId, name.trim(), description?.trim() || null, count === 0],
-          )
-        ).rows[0].id as string;
+            [user.orgId, projectId, name.trim(), description?.trim() || null, isDefault],
+          );
+
+        // A savepoint so a lost race can roll back just the failed insert and
+        // retry, without poisoning the whole transaction (any error otherwise
+        // aborts every later statement, including provisionSystemStructure).
+        await c.query('savepoint create_template');
+        let templateId: string;
+        try {
+          templateId = (await insert(count === 0)).rows[0].id as string;
+        } catch (err) {
+          if (count === 0 && isDefaultConflict(err)) {
+            await c.query('rollback to savepoint create_template');
+            templateId = (await insert(false)).rows[0].id as string;
+          } else {
+            throw err;
+          }
+        }
 
         await this.provisionSystemStructure(c, user.orgId, templateId);
         return { id: templateId };
@@ -212,13 +235,29 @@ export class TemplatesService {
             .rows[0].count,
         );
 
-        const newId = (
-          await c.query(
+        const insert = (isDefault: boolean) =>
+          c.query(
             `insert into public.templates (org_id, project_id, name, is_default)
              values ($1, $2, $3, $4) returning id`,
-            [user.orgId, targetProjectId, src.name, targetCount === 0],
-          )
-        ).rows[0].id as string;
+            [user.orgId, targetProjectId, src.name, isDefault],
+          );
+
+        // See createTemplate for why this needs a savepoint: two concurrent
+        // clones into the same empty project can both lose the race for
+        // is_default, and the loser should fall back to non-default instead
+        // of failing outright.
+        await c.query('savepoint clone_template');
+        let newId: string;
+        try {
+          newId = (await insert(targetCount === 0)).rows[0].id as string;
+        } catch (err) {
+          if (targetCount === 0 && isDefaultConflict(err)) {
+            await c.query('rollback to savepoint clone_template');
+            newId = (await insert(false)).rows[0].id as string;
+          } else {
+            throw err;
+          }
+        }
 
         const tabs = (
           await c.query(
@@ -537,9 +576,24 @@ function mapFieldError(err: unknown): unknown {
   return err;
 }
 
+/** True when `err` is the unique-violation from `templates_one_default_per_project`
+ *  (two concurrent creates racing for "first template in the project"), as opposed
+ *  to any other unique violation (e.g. a duplicate name). */
+function isDefaultConflict(err: unknown): boolean {
+  const e = err as { code?: string; constraint?: string };
+  return e.code === UNIQUE_VIOLATION && e.constraint === 'templates_one_default_per_project';
+}
+
 function mapWriteError(err: unknown): unknown {
-  const code = (err as { code?: string }).code;
-  if (code === RLS_VIOLATION) return new ForbiddenException('You cannot manage templates in this project');
-  if (code === UNIQUE_VIOLATION) return new ForbiddenException('A template with that name already exists');
+  const e = err as { code?: string; constraint?: string };
+  if (e.code === RLS_VIOLATION) return new ForbiddenException('You cannot manage templates in this project');
+  if (e.code === UNIQUE_VIOLATION) {
+    // Distinguish by constraint — a stray default-index conflict (createTemplate/
+    // cloneToProject already retry past this; anything left here is unexpected)
+    // shouldn't be blamed on the name.
+    return e.constraint === 'templates_one_default_per_project'
+      ? new ForbiddenException('Another template just became the default — try again')
+      : new ForbiddenException('A template with that name already exists');
+  }
   return err;
 }

@@ -521,10 +521,11 @@ export const api = {
     request<{ ok: true }>(`/template-tabs/${tabId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteTab: (tabId: string) =>
     request<{ ok: true }>(`/template-tabs/${tabId}`, { method: 'DELETE' }),
-  saveField: (itemId: string, fieldId: string, value: unknown) =>
+  saveField: (itemId: string, fieldId: string, value: unknown, signal?: AbortSignal) =>
     request<{ ok: true }>(`/content/items/${itemId}/fields/${fieldId}`, {
       method: 'PUT',
       body: JSON.stringify({ value }),
+      signal,
     }),
 
   // Comments -----------------------------------------------------------------
@@ -557,6 +558,10 @@ export const api = {
     request<{ ok: true }>(`/files/${id}`, { method: 'PATCH', body: JSON.stringify({ folder }) }),
   deleteFile: (id: string) => request<{ ok: true }>(`/files/${id}`, { method: 'DELETE' }),
 
+  /** The signed-in caller's own permission set, for hiding UI they can't use
+   *  (the API still enforces the real gate; this just skips the dead end). */
+  me: () => request<CurrentUser>('/auth/me'),
+
   /* ---- roles & permissions (Team → Roles) ---- */
   listPermissionsCatalogue: () => request<PermissionDef[]>('/permissions'),
   listRoles: () => request<Role[]>('/roles'),
@@ -571,6 +576,15 @@ export const api = {
   duplicateRole: (id: string) => request<{ id: string }>(`/roles/${id}/duplicate`, { method: 'POST' }),
   deleteRole: (id: string) => request<{ ok: true }>(`/roles/${id}`, { method: 'DELETE' }),
 };
+
+/** The signed-in caller, as returned by GET /auth/me. */
+export interface CurrentUser {
+  userId: string;
+  orgId: string;
+  isOwner: boolean;
+  roleId: string;
+  permissions: string[];
+}
 
 /** One entry in the universal permission catalogue (grouped + ordered). */
 export interface PermissionDef {

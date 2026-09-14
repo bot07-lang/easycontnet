@@ -10,6 +10,12 @@ interface Cat { id: string; name: string }
  * with the backend model.
  */
 export function CategoriesPage({ projectId }: { projectId: string }) {
+  // `cats` only ever loads from the store in the useState initializer (once per
+  // mount) and every change writes straight back to `projectId` — so this relies
+  // on the caller remounting the component (key={projectId}) when the project
+  // changes. Without that, switching projects on the sidebar while this stays
+  // mounted would keep showing/editing the OLD project's categories and then
+  // overwrite the NEW project's stored list with them.
   const [cats, setCats] = useState<Cat[]>(() => getProjectCategories(projectId).map((name) => ({ id: crypto.randomUUID(), name })));
   // Persist names to the shared store so the item editor's picker sees them.
   useEffect(() => { setProjectCategories(projectId, cats.map((c) => c.name)); }, [cats, projectId]);
@@ -109,7 +115,10 @@ export function CategoriesPage({ projectId }: { projectId: string }) {
                     className="w-[360px] max-w-full rounded-md border border-blue-500 bg-white px-3 py-2 text-[15px] focus:outline-none"
                   />
                 ) : (
-                  <span className="w-[360px] max-w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[15px] text-slate-800">
+                  // Plain text, not input-styled — this is read-only display;
+                  // the separate Edit button is the only way to change it, so
+                  // a bordered/filled "field" look would suggest otherwise.
+                  <span className="w-[360px] max-w-full px-3 py-2 text-[15px] text-slate-800">
                     {c.name}
                   </span>
                 )}

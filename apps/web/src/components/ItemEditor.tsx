@@ -10,6 +10,7 @@ import { Field } from './Field';
 import { ControlsTab } from './ControlsTab';
 import { CommentsTab } from './CommentsTab';
 import { SubmitModal } from './SubmitModal';
+import { ApproveReviewModal } from './ApproveReviewModal';
 import { ItemIdContext } from '../lib/item-context';
 import { toast } from '../lib/toast';
 import { toPlainText } from '../lib/counts';
@@ -95,6 +96,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
   // and the Submit / Approve actions.
   const approval = useQuery({ queryKey: ['approval', item.id], queryFn: () => api.getApprovalInfo(item.id) });
   const [submitOpen, setSubmitOpen] = useState(false);
+  const [approveOpen, setApproveOpen] = useState(false);
 
   // The editor is locked when the current status is read-only OR the caller
   // can't edit this item (not assigned to the current status and lacking
@@ -149,6 +151,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
       void qc.invalidateQueries({ queryKey: ['versions', item.id] });
       onReload();
     },
+    onError: () => toast('Could not change this item’s status — you may not have permission.'),
   });
 
   const claim = useMutation({
@@ -237,6 +240,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
       clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSavedFlash(false), 2500);
     },
+    onError: () => toast('Could not save this version — you may not have permission.'),
   });
   useEffect(() => () => clearTimeout(savedTimer.current), []);
   const restore = useMutation({
@@ -249,6 +253,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
       onReload();
       toast('The version has been restored');
     },
+    onError: () => toast('Could not restore this version — you may not have permission.'),
   });
 
   const tab = item.tabs.find((t) => t.id === activeTab) ?? item.tabs[0];
@@ -408,9 +413,18 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
               Submit for review
             </button>
           )}
-          <div className="inline-flex items-center gap-2">
+          {approval.data?.canApprove && (
+            <button type="button" onClick={() => setApproveOpen(true)}
+                    className="rounded-md bg-green-600 px-4 py-1.5 text-[13px] font-semibold uppercase tracking-wide text-white shadow-sm hover:bg-green-700">
+              Approve
+            </button>
+          )}
+          {/* Save version + Export read as one split button — a shared border/
+              background with an internal divider, rather than two separate
+              boxes with a gap that made the lone chevron look stray. */}
+          <div className="inline-flex items-center rounded-md border border-slate-300 bg-white shadow-sm">
             <button type="button" onClick={() => saveVersion.mutate()} disabled={saveVersion.isPending || savedFlash}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-100">
+                    className="inline-flex items-center gap-1.5 rounded-l-md px-3 py-1.5 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-100">
               {savedFlash ? (
                 <>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 6 9 17l-5-5" /></svg>
@@ -425,7 +439,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
             </button>
             <div className="relative">
               <button type="button" onClick={() => setExportOpen((o) => !o)} title="Export"
-                      className="grid h-full place-items-center rounded-md border border-slate-300 bg-white px-1.5 py-1.5 text-slate-600 hover:bg-slate-50">
+                      className="grid h-full place-items-center rounded-r-md border-l border-slate-300 px-1.5 py-1.5 text-slate-600 hover:bg-slate-50">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
               </button>
               {exportOpen && (
@@ -479,7 +493,7 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
       )}
 
       {/* Fields — editable, or a read-only render of the previewed version. */}
-      <div className="space-y-5 px-5 py-6">
+      <div className="space-y-6 px-5 py-6">
         {preview ? (
           <>
             <style>{DIFF_CSS}</style>
@@ -588,6 +602,10 @@ function Loaded({ item, projectId, onReload, onOpenItem, onOpenTemplate, sideTab
       {submitOpen && approval.data && (
         <SubmitModal itemId={item.id} projectId={projectId} approval={approval.data}
                      onClose={() => setSubmitOpen(false)} onDone={() => { setSubmitOpen(false); onReload(); }} />
+      )}
+      {approveOpen && approval.data && (
+        <ApproveReviewModal itemId={item.id} projectId={projectId} approval={approval.data}
+                             onClose={() => setApproveOpen(false)} onDone={() => { setApproveOpen(false); onReload(); }} />
       )}
     </div>
     </ItemIdContext.Provider>
@@ -737,14 +755,17 @@ function VersionsTab({
   const rename = useMutation({
     mutationFn: (v: { vid: string; label: string }) => api.renameVersion(v.vid, v.label),
     onSuccess: () => { invalidate(); setRenameId(null); },
+    onError: () => toast('Could not rename this version — you may not have permission.'),
   });
   const del = useMutation({
     mutationFn: (vid: string) => api.deleteVersion(vid),
     onSuccess: () => { invalidate(); setDeleteConfirmId(null); setMenuId(null); },
+    onError: () => toast('Could not delete this version — you may not have permission.'),
   });
   const copy = useMutation({
     mutationFn: (v: { vid: string; name: string }) => api.copyVersionToItem(v.vid, v.name),
     onSuccess: (res) => { setCopyId(null); onOpenItem?.(res.id); },
+    onError: () => toast('Could not copy this version to a new item — you may not have permission.'),
   });
 
   const list = versions.data ?? [];

@@ -233,10 +233,14 @@ function RoleRow({
       )}
 
       <div className={`flex flex-1 items-center gap-3 rounded ${role.is_active ? '' : 'opacity-50'}`}>
-        <div className="w-[300px] rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-[15px] text-slate-800">
-          {role.name}{!role.is_active && <span className="ml-2 text-[12px] text-slate-400">(inactive)</span>}
+        {/* Plain text, not input-styled — this row is read-only display; the
+            separate Edit button is the only way to actually change it, so
+            giving it a bordered/filled "field" look would suggest you can
+            click in and type, which you can't. */}
+        <div className="w-[300px] px-3 py-2.5 text-[15px] font-medium text-slate-800">
+          {role.name}{!role.is_active && <span className="ml-2 text-[12px] font-normal text-slate-400">(inactive)</span>}
         </div>
-        <div className="flex-1 rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-[15px] text-slate-600">
+        <div className="flex-1 px-3 py-2.5 text-[15px] text-slate-500">
           {role.description || <span className="text-slate-300">—</span>}
         </div>
       </div>

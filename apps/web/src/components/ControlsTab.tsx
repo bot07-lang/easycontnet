@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ApiItem, type AssignmentStatus } from '../lib/api';
-import { getItemCategories, setItemCategories, getProjectCategories } from '../lib/categories-store';
+import { getItemCategories, setItemCategories, getProjectCategories, useCategories } from '../lib/categories-store';
 import { AssignDialog } from './AssignDialog';
 import { avatarColor, avatarInitial } from '../lib/avatar';
 
@@ -94,7 +94,13 @@ export function ControlsTab({
 
   // Categories — assign the project's categories (defined on the Categories page)
   // to this item. Frontend-only for now (localStorage store, shared with that page).
-  const [categories, setCategories] = useState<string[]>(() => getItemCategories(item.id));
+  // Read via the reactive store hook, not a useState initializer — this tab
+  // doesn't remount when you navigate from one item to another (only `item`'s
+  // prop value changes), so a plain useState(() => getItemCategories(item.id))
+  // would keep showing the PREVIOUS item's categories after switching, and
+  // saving would overwrite the new item's categories with the old one's (the
+  // same bug already fixed on the standalone Categories page).
+  const categories = useCategories(() => getItemCategories(item.id));
   const [catEditing, setCatEditing] = useState(false);
   const [catDraft, setCatDraft] = useState<string[]>([]);
   const [projectCats, setProjectCats] = useState<string[]>([]);
@@ -105,7 +111,7 @@ export function ControlsTab({
   };
   const toggleCat = (c: string) => setCatDraft((d) => (d.includes(c) ? d.filter((x) => x !== c) : [...d, c]));
   const catChanged = JSON.stringify([...catDraft].sort()) !== JSON.stringify([...categories].sort());
-  const saveCat = () => { setItemCategories(item.id, catDraft); setCategories(catDraft); setCatEditing(false); };
+  const saveCat = () => { setItemCategories(item.id, catDraft); setCatEditing(false); };
 
   return (
     <div className="text-[14px]">

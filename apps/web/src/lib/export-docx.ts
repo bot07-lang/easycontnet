@@ -61,16 +61,30 @@ async function loadImage(url: string): Promise<LoadedImage | null> {
     const res = await fetch(url);
     if (!res.ok) return null;
     const blob = await res.blob();
-    const type = imgType(blob.type, url);
-    if (!type) return null;
-    const data = new Uint8Array(await blob.arrayBuffer());
+    let type = imgType(blob.type, url);
+    let data = new Uint8Array(await blob.arrayBuffer());
     let width = 300;
     let height = 200;
     try {
       const bmp = await createImageBitmap(blob);
       width = bmp.width; height = bmp.height;
+      if (!type) {
+        // Not one of the four formats `docx`'s ImageRun natively accepts (e.g.
+        // webp, which browsers decode fine but Word embedding does not support)
+        // — the browser CAN still decode it (createImageBitmap succeeded), so
+        // re-encode to PNG via canvas instead of silently dropping the image.
+        const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(bmp, 0, 0);
+          const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
+          data = new Uint8Array(await pngBlob.arrayBuffer());
+          type = 'png';
+        }
+      }
       bmp.close?.();
-    } catch { /* keep defaults */ }
+    } catch { /* keep defaults; bail below if we still have no usable type */ }
+    if (!type) return null;
     return { data, width, height, type };
   } catch {
     return null;
@@ -108,6 +122,10 @@ function collectImageUrls(item: ApiItem, values: Values, fileUrls: Map<string, s
         if (src && /^https?:/i.test(src)) urls.add(src);
       });
     }
+    if ((f.type === 'featured_image' || f.type === 'single_image') && v && typeof v === 'object') {
+      const url = (v as { url?: string }).url;
+      if (url) urls.add(url);
+    }
   }
   return [...urls];
 }
@@ -129,6 +147,22 @@ function guidelineParagraph(text: string): Paragraph {
 
 function plainParagraph(text: string): Paragraph {
   return new Paragraph({ children: [new TextRun({ text, color: BLACK })] });
+}
+
+/** A genuinely-plain-text value (never HTML) split into Word paragraphs the
+ *  same way diff-fields.ts's plainToHtml does: a blank line starts a new
+ *  Word paragraph, a single newline becomes a soft line break within one —
+ *  otherwise multi-line plain text collapses onto a single visual line. */
+function plainParagraphs(text: string): Paragraph[] {
+  return text.split(/\n{2,}/).map((block) => {
+    const lines = block.split('\n');
+    const children: TextRun[] = [];
+    lines.forEach((line, i) => {
+      if (i > 0) children.push(new TextRun({ break: 1 }));
+      children.push(new TextRun({ text: line, color: BLACK }));
+    });
+    return new Paragraph({ children });
+  });
 }
 
 // ---- rich text (stored HTML) → Word paragraphs ----
@@ -251,19 +285,45 @@ function fieldParagraphs(f: ApiField, value: unknown, fileUrls: Map<string, stri
     return out;
   }
 
+  // featured_image / single_image store {url, alt} — embed the image itself
+  // (via the pre-fetched `images` map, same as file_image_upload) instead of
+  // falling to the generic stripHtml(fieldValueToHtml(...)) path below, which
+  // strips the <img> tag down to nothing since it has no text content.
+  if (f.type === 'featured_image' || f.type === 'single_image') {
+    const v = (value ?? {}) as { url?: string; alt?: string };
+    const img = v.url ? images.get(v.url) : undefined;
+    if (img) {
+      out.push(new Paragraph({ children: [imageRun(img, 300)] }));
+    } else if (v.url) {
+      // Image URL set but couldn't be fetched/decoded — still surface the URL
+      // rather than silently rendering nothing.
+      out.push(new Paragraph({ children: [new ExternalHyperlink({ link: v.url, children: [new TextRun({ text: v.url, color: LINK, underline: {} })] })] }));
+    } else {
+      out.push(plainParagraph('—'));
+    }
+    return out;
+  }
+
   if (f.type === 'paragraph_text' && !f.isPlainText && typeof value === 'string') {
     out.push(...richParagraphs(value, images));
     return out;
   }
 
-  // Plain text area (reference dumped raw HTML; we strip tags), single line,
-  // date, dropdown, and any other simple value → one plain paragraph.
-  let text: string;
-  if (typeof value === 'string') {
-    text = f.type === 'paragraph_text' ? stripHtml(value) : value;
-  } else {
-    text = stripHtml(fieldValueToHtml({ id: f.id, type: f.type, label: f.label, isPlainText: f.isPlainText, choices: f.choices }, value) || '');
+  // A plain-text area (isPlainText — the !isPlainText / HTML case already
+  // returned above) is never HTML, so it's split into paragraphs/line breaks
+  // as-is rather than run through stripHtml, which would delete any literal
+  // "<"/">" the user typed and had no tags to strip in the first place.
+  if (f.type === 'paragraph_text' && typeof value === 'string') {
+    out.push(...plainParagraphs(value));
+    return out;
   }
+
+  // Single line, date, dropdown, and any other simple value → one plain
+  // paragraph. Non-string values here (e.g. a stale/unknown shape) still go
+  // through fieldValueToHtml + stripHtml as a best-effort text fallback.
+  const text = typeof value === 'string'
+    ? value
+    : stripHtml(fieldValueToHtml({ id: f.id, type: f.type, label: f.label, isPlainText: f.isPlainText, choices: f.choices }, value) || '');
   out.push(plainParagraph(text));
   return out;
 }
