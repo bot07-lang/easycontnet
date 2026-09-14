@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Editor } from '@tiptap/react';
 import { useOverflowsRight } from '../lib/overflow';
+import {
+  cutRow, copyRow, pasteRowBefore, pasteRowAfter,
+  cutColumn, copyColumn, pasteColumnBefore, pasteColumnAfter,
+} from './editor-table-ops';
 
 /**
  * Table menu, matching the reference layout: a compact top-level list where
@@ -27,7 +31,14 @@ function SubPanel({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function TableMenu({ editor }: { editor: Editor }) {
+export function TableMenu({
+  editor, onOpenTableProps, onOpenCellProps, onOpenRowProps,
+}: {
+  editor: Editor;
+  onOpenTableProps?: () => void;
+  onOpenCellProps?: () => void;
+  onOpenRowProps?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [sub, setSub] = useState<null | 'table' | 'cell' | 'row' | 'column'>(null);
   const [hover, setHover] = useState({ r: 0, c: 0 });
@@ -70,9 +81,7 @@ export function TableMenu({ editor }: { editor: Editor }) {
     </div>
   );
 
-  /** A leaf action inside a submenu. Disabled entries mirror the reference's
-   *  greyed items (properties dialogs, row/column clipboard) that Tiptap's
-   *  table extension doesn't provide commands for. */
+  /** A leaf action inside a submenu. */
   const Action = ({ label, onClick, disabled }: { label: string; onClick?: () => void; disabled?: boolean }) => (
     <button
       type="button"
@@ -148,7 +157,7 @@ export function TableMenu({ editor }: { editor: Editor }) {
           <Row label="Cell" disabled={!inTable} onHover={() => setSub('cell')}>
             {sub === 'cell' && (
               <SubPanel>
-                <Action label="Cell properties" disabled />
+                <Action label="Cell properties" onClick={() => run(() => onOpenCellProps?.())} />
                 <Action label="Merge cells" onClick={() => run(() => editor.chain().focus().mergeCells().run())} />
                 <Action label="Split cell" onClick={() => run(() => editor.chain().focus().splitCell().run())} />
               </SubPanel>
@@ -162,12 +171,12 @@ export function TableMenu({ editor }: { editor: Editor }) {
                 <Action label="Insert row before" onClick={() => run(() => editor.chain().focus().addRowBefore().run())} />
                 <Action label="Insert row after" onClick={() => run(() => editor.chain().focus().addRowAfter().run())} />
                 <Action label="Delete row" onClick={() => run(() => editor.chain().focus().deleteRow().run())} />
-                <Action label="Row properties" disabled />
+                <Action label="Row properties" onClick={() => run(() => onOpenRowProps?.())} />
                 <div className="my-1 border-t border-slate-200" />
-                <Action label="Cut row" disabled />
-                <Action label="Copy row" disabled />
-                <Action label="Paste row before" disabled />
-                <Action label="Paste row after" disabled />
+                <Action label="Cut row" onClick={() => run(() => cutRow(editor))} />
+                <Action label="Copy row" onClick={() => run(() => copyRow(editor))} />
+                <Action label="Paste row before" onClick={() => run(() => pasteRowBefore(editor))} />
+                <Action label="Paste row after" onClick={() => run(() => pasteRowAfter(editor))} />
               </SubPanel>
             )}
           </Row>
@@ -180,24 +189,28 @@ export function TableMenu({ editor }: { editor: Editor }) {
                 <Action label="Insert column after" onClick={() => run(() => editor.chain().focus().addColumnAfter().run())} />
                 <Action label="Delete column" onClick={() => run(() => editor.chain().focus().deleteColumn().run())} />
                 <div className="my-1 border-t border-slate-200" />
-                <Action label="Cut column" disabled />
-                <Action label="Copy column" disabled />
-                <Action label="Paste column before" disabled />
-                <Action label="Paste column after" disabled />
+                <Action label="Cut column" onClick={() => run(() => cutColumn(editor))} />
+                <Action label="Copy column" onClick={() => run(() => copyColumn(editor))} />
+                <Action label="Paste column before" onClick={() => run(() => pasteColumnBefore(editor))} />
+                <Action label="Paste column after" onClick={() => run(() => pasteColumnAfter(editor))} />
               </SubPanel>
             )}
           </Row>
 
           <div className="my-1 border-t border-slate-200" />
 
-          {/* Table properties — not built yet, shown disabled like the reference. */}
-          <div
-            className="cursor-not-allowed px-3 py-2 text-[14px] text-slate-300"
-            title="Table properties — coming later"
+          <button
+            type="button"
+            disabled={!inTable}
             onMouseEnter={() => setSub(null)}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => run(() => onOpenTableProps?.())}
+            className={`block w-full px-3 py-2 text-left text-[14px] ${
+              inTable ? 'text-slate-700 hover:bg-slate-100' : 'cursor-not-allowed text-slate-300'
+            }`}
           >
             Table properties
-          </div>
+          </button>
 
           <button
             type="button"

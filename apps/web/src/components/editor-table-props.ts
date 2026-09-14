@@ -1,4 +1,7 @@
 import Table from '@tiptap/extension-table';
+import TableRow from '@tiptap/extension-table-row';
+import TableCell from '@tiptap/extension-table-cell';
+import TableHeader from '@tiptap/extension-table-header';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 
@@ -127,4 +130,66 @@ export interface TableProps {
   tblBorderColor: string;
   tblBorderStyle: string;
   tblBg: string;
+}
+
+/**
+ * Row and cell properties — background colour, plus a fixed height for rows
+ * and vertical alignment for cells. Unlike the table itself, <tr>/<td>/<th>
+ * render through the default schema (no custom node view), so plain
+ * declarative attributes are enough — no reapply-on-transaction plugin needed.
+ */
+export const TableRowWithProps = TableRow.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      rowBg: {
+        default: null,
+        parseHTML: (el) => el.getAttribute('data-row-bg'),
+        renderHTML: (a) => (a.rowBg ? { 'data-row-bg': a.rowBg, style: `background-color: ${a.rowBg}` } : {}),
+      },
+      rowHeight: {
+        default: null,
+        parseHTML: (el) => el.getAttribute('data-row-height'),
+        renderHTML: (a) => (a.rowHeight ? { 'data-row-height': a.rowHeight, style: `height: ${a.rowHeight}` } : {}),
+      },
+    };
+  },
+});
+
+function cellPropAttributes() {
+  return {
+    cellBg: {
+      default: null,
+      parseHTML: (el: HTMLElement) => el.getAttribute('data-cell-bg'),
+      renderHTML: (a: Record<string, unknown>) => (a.cellBg ? { 'data-cell-bg': a.cellBg, style: `background-color: ${a.cellBg}` } : {}),
+    },
+    cellVAlign: {
+      default: null,
+      parseHTML: (el: HTMLElement) => el.getAttribute('data-cell-valign'),
+      renderHTML: (a: Record<string, unknown>) => (a.cellVAlign ? { 'data-cell-valign': a.cellVAlign, style: `vertical-align: ${a.cellVAlign}` } : {}),
+    },
+  };
+}
+
+export const TableCellWithProps = TableCell.extend({
+  addAttributes() {
+    return { ...this.parent?.(), ...cellPropAttributes() };
+  },
+});
+
+export const TableHeaderWithProps = TableHeader.extend({
+  addAttributes() {
+    return { ...this.parent?.(), ...cellPropAttributes() };
+  },
+});
+
+/** The shape the Row/Cell Properties dialogs read/write. */
+export interface RowProps {
+  rowBg: string;
+  rowHeight: string;
+}
+
+export interface CellProps {
+  cellBg: string;
+  cellVAlign: string;
 }

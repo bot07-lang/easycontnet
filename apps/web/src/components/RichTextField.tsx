@@ -74,9 +74,7 @@ import TextAlign from '@tiptap/extension-text-align';
 import TextStyle from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
 import Highlight from '@tiptap/extension-highlight';
-import TableRow from '@tiptap/extension-table-row';
-import TableCell from '@tiptap/extension-table-cell';
-import TableHeader from '@tiptap/extension-table-header';
+import { TableRowWithProps, TableCellWithProps, TableHeaderWithProps, type RowProps, type CellProps } from './editor-table-props';
 import Youtube from '@tiptap/extension-youtube';
 import Placeholder from '@tiptap/extension-placeholder';
 import Superscript from '@tiptap/extension-superscript';
@@ -89,6 +87,8 @@ import { TableOfContents } from './editor-toc';
 import { Figure } from './editor-figure';
 import { TableWithProps, type TableProps } from './editor-table-props';
 import { TablePropsDialog } from './TablePropsDialog';
+import { RowPropsDialog } from './RowPropsDialog';
+import { CellPropsDialog } from './CellPropsDialog';
 import { KeywordHighlight, keywordHighlightKey } from './editor-keyword-highlight';
 import { buildImageFrame } from './editor-image-resize';
 import { EditorToolbar } from './EditorToolbar';
@@ -159,6 +159,8 @@ export function RichTextField({
   const [editSrc, setEditSrc] = useState<string | null>(null); // Edit Image modal source
   const [imgDialog, setImgDialog] = useState<ImageValue | null>(null); // Insert/Edit Image
   const [tableProps, setTableProps] = useState<TableProps | null>(null); // Table Properties
+  const [rowProps, setRowProps] = useState<RowProps | null>(null); // Row Properties
+  const [cellProps, setCellProps] = useState<CellProps | null>(null); // Cell Properties
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null); // image right-click menu
 
   const editor = useEditor({
@@ -190,9 +192,9 @@ export function RichTextField({
       TaskItem.configure({ nested: true }),
       Highlight.configure({ multicolor: true }),
       TableWithProps.configure({ resizable: true }),
-      TableRow,
-      TableHeader,
-      TableCell,
+      TableRowWithProps,
+      TableHeaderWithProps,
+      TableCellWithProps,
       // A YouTube iframe is a separate document, so clicking it almost never
       // reaches ProseMirror to select the node — Backspace/Delete then has
       // nothing to act on. addNodeView layers a real "delete" button above
@@ -483,6 +485,31 @@ export function RichTextField({
     setTableProps(null);
   };
 
+  // Row properties: the enclosing <tr>'s attributes.
+  const openRowProps = () => {
+    const a = editor.getAttributes('tableRow');
+    setRowProps({ rowBg: (a.rowBg as string) ?? '', rowHeight: (a.rowHeight as string) ?? '' });
+  };
+  const applyRowProps = (v: RowProps) => {
+    editor.chain().focus().updateAttributes('tableRow', {
+      rowBg: v.rowBg.trim() || null,
+      rowHeight: v.rowHeight.trim() || null,
+    }).run();
+    setRowProps(null);
+  };
+
+  // Cell properties: applies to whichever of tableCell/tableHeader the
+  // selection is actually in (and to every cell in a multi-cell selection).
+  const openCellProps = () => {
+    const a = { ...editor.getAttributes('tableHeader'), ...editor.getAttributes('tableCell') };
+    setCellProps({ cellBg: (a.cellBg as string) ?? '', cellVAlign: (a.cellVAlign as string) ?? '' });
+  };
+  const applyCellProps = (v: CellProps) => {
+    const attrs = { cellBg: v.cellBg.trim() || null, cellVAlign: v.cellVAlign || null };
+    editor.chain().focus().updateAttributes('tableCell', attrs).updateAttributes('tableHeader', attrs).run();
+    setCellProps(null);
+  };
+
   // Toolbar is always visible on rich fields. Focus-based show/hide proved
   // fragile under React StrictMode (the editor is torn down and rebuilt, so
   // focus listeners land on stale instances); a persistent toolbar is the
@@ -587,6 +614,9 @@ export function RichTextField({
         linkedFiles={linkedFiles}
         disabled={!editable}
         fieldId={fieldId}
+        onOpenTableProps={openTableProps}
+        onOpenCellProps={openCellProps}
+        onOpenRowProps={openRowProps}
       />
 
       <div className={`rt-body ${fullscreen ? 'flex-1 overflow-y-auto' : scrollable ? 'max-h-[460px] overflow-y-auto' : ''}`}>
@@ -601,6 +631,14 @@ export function RichTextField({
       {/* Table Properties — width/height/border/padding/spacing/alignment/colours. */}
       {tableProps && (
         <TablePropsDialog initial={tableProps} onClose={() => setTableProps(null)} onSave={applyTableProps} />
+      )}
+
+      {/* Row / Cell Properties. */}
+      {rowProps && (
+        <RowPropsDialog initial={rowProps} onClose={() => setRowProps(null)} onSave={applyRowProps} />
+      )}
+      {cellProps && (
+        <CellPropsDialog initial={cellProps} onClose={() => setCellProps(null)} onSave={applyCellProps} />
       )}
 
       {/* Image right-click menu: Image… (Insert/Edit dialog) · Edit image (editor). */}

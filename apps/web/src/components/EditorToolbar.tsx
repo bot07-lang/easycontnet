@@ -143,6 +143,7 @@ const I = {
 
 export function EditorToolbar({
   editor, docTitle, fullscreen, onToggleFullscreen, onUpload, linkedImages, linkedFiles, disabled = false, fieldId,
+  onOpenTableProps, onOpenCellProps, onOpenRowProps,
 }: {
   editor: Editor;
   docTitle?: string;
@@ -160,6 +161,11 @@ export function EditorToolbar({
   disabled?: boolean;
   /** The field's id — enables the selection-bubble "comment" action. */
   fieldId?: string;
+  /** Opens the Table/Cell/Row Properties dialogs (owned by RichTextField, which
+   *  holds their state — the table menu here just triggers them). */
+  onOpenTableProps?: () => void;
+  onOpenCellProps?: () => void;
+  onOpenRowProps?: () => void;
 }) {
   const [, forceRender] = useReducer((n: number) => n + 1, 0);
   const [imageOpen, setImageOpen] = useState(false);
@@ -431,7 +437,7 @@ export function EditorToolbar({
           </BubBtn>
           {/* Full Table menu (Table size grid / Cell / Row / Column / properties /
               delete) — the same dropdown as the toolbar, matching the reference. */}
-          <TableMenu editor={editor} />
+          <TableMenu editor={editor} onOpenTableProps={onOpenTableProps} onOpenCellProps={onOpenCellProps} onOpenRowProps={onOpenRowProps} />
           <span className="mx-1 h-6 w-px bg-slate-200" />
 
           {/* Comment on the highlighted text (a text-anchored comment). */}
@@ -550,7 +556,7 @@ export function EditorToolbar({
         <Btn title="Insert or edit link (⌘K)" active={editor.isActive('link')} onClick={openLink}>
           <Icon>{I.link}</Icon>
         </Btn>
-        <TableMenu editor={editor} />
+        <TableMenu editor={editor} onOpenTableProps={onOpenTableProps} onOpenCellProps={onOpenCellProps} onOpenRowProps={onOpenRowProps} />
         <Btn title="Insert or edit image" onClick={() => setImageOpen(true)}>
           <Icon>{I.image}</Icon>
         </Btn>
