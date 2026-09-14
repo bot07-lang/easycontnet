@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import type { Request, Response } from 'express';
+import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 
 /**
@@ -18,6 +19,8 @@ let cached: ExpressInstance | null = null;
 async function getApp(): Promise<ExpressInstance> {
   if (cached) return cached;
   const app = await NestFactory.create(AppModule, { logger: ['error', 'warn'] });
+  // Same hardening as main.ts — CSP left off, same reasoning (see there).
+  app.use(helmet({ contentSecurityPolicy: false }));
   app.setGlobalPrefix('api');
   // Fails CLOSED, not open: an unset CORS_ORIGINS means no cross-origin
   // caller is allowed (same-origin requests — the normal case, since the SPA

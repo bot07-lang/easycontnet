@@ -17,6 +17,7 @@
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/serve-static": "^5.0.5",
     "@supabase/supabase-js": "^2.48.0",
+    "helmet": "^8.3.0",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
