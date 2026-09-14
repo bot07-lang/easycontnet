@@ -4,6 +4,12 @@
   "private": true,
   "engines": { "node": ">=24" },
   "packageManager": "pnpm@11.7.0",
+  "pnpm": {
+    "overrides": {
+      "multer": "^2.4.0",
+      "qs": "^6.16.0"
+    }
+  },
   "scripts": {
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
     "dev:web": "pnpm --filter @content/web dev",
