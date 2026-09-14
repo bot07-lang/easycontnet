@@ -22,13 +22,6 @@ async function bootstrap() {
   loadEnv();
   const app = await NestFactory.create(AppModule, { cors: false });
 
-  // TEMP diagnostic logging — remove once the "can't reach API" issue is resolved.
-  app.use((req: import('express').Request, _res: import('express').Response, next: () => void) => {
-    // eslint-disable-next-line no-console
-    console.log(`[req] ${req.method} ${req.url} origin=${req.headers.origin ?? '(none)'}`);
-    next();
-  });
-
   // All API routes live under /api. This keeps them clear of the SPA when the
   // built frontend is served from this same process (merged deployment), and is
   // harmless when the API runs standalone.

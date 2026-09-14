@@ -19,8 +19,13 @@ async function getApp(): Promise<ExpressInstance> {
   if (cached) return cached;
   const app = await NestFactory.create(AppModule, { logger: ['error', 'warn'] });
   app.setGlobalPrefix('api');
-  const origins = (process.env.CORS_ORIGINS ?? '*').split(',').map((s) => s.trim());
-  app.enableCors({ origin: origins.includes('*') ? true : origins, credentials: true });
+  // Fails CLOSED, not open: an unset CORS_ORIGINS means no cross-origin
+  // caller is allowed (same-origin requests — the normal case, since the SPA
+  // is rewritten to this same function on Vercel — are unaffected either
+  // way). "*" must be set explicitly to allow any origin; it's never the
+  // default for a missing env var.
+  const origins = (process.env.CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  app.enableCors({ origin: origins.includes('*') ? true : origins.length > 0 ? origins : false, credentials: true });
   await app.init();
   const instance = app.getHttpAdapter().getInstance() as ExpressInstance;
   cached = instance;
