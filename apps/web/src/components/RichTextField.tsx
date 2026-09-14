@@ -97,9 +97,10 @@ import { FontSize, LineHeight, Div, Indent, GenericEmbed, embedNodeView, isSafeU
 import { TableOfContents } from './editor-toc';
 import { Figure } from './editor-figure';
 import { TableWithProps, type TableProps } from './editor-table-props';
-import { TablePropsDialog } from './TablePropsDialog';
-import { RowPropsDialog } from './RowPropsDialog';
-import { CellPropsDialog } from './CellPropsDialog';
+// Table/Row/Cell Properties are opened rarely — lazy, like EditImageModal.
+const TablePropsDialog = lazy(() => import('./TablePropsDialog').then((m) => ({ default: m.TablePropsDialog })));
+const RowPropsDialog = lazy(() => import('./RowPropsDialog').then((m) => ({ default: m.RowPropsDialog })));
+const CellPropsDialog = lazy(() => import('./CellPropsDialog').then((m) => ({ default: m.CellPropsDialog })));
 import { KeywordHighlight, keywordHighlightKey } from './editor-keyword-highlight';
 import { buildImageFrame } from './editor-image-resize';
 import { EditorToolbar } from './EditorToolbar';
@@ -639,17 +640,21 @@ export function RichTextField({
         <ImageDialog initial={imgDialog} onClose={() => setImgDialog(null)} onSave={applyImgDialog} onUpload={uploadForDialog} linkedImages={linkedImages} />
       )}
 
-      {/* Table Properties — width/height/border/padding/spacing/alignment/colours. */}
-      {tableProps && (
-        <TablePropsDialog initial={tableProps} onClose={() => setTableProps(null)} onSave={applyTableProps} />
-      )}
-
-      {/* Row / Cell Properties. */}
-      {rowProps && (
-        <RowPropsDialog initial={rowProps} onClose={() => setRowProps(null)} onSave={applyRowProps} />
-      )}
-      {cellProps && (
-        <CellPropsDialog initial={cellProps} onClose={() => setCellProps(null)} onSave={applyCellProps} />
+      {/* Table/Row/Cell Properties — width/height/border/padding/spacing/
+          alignment/colours. Lazy, so the fallback only ever shows for the
+          brief moment before the chunk loads. */}
+      {(tableProps || rowProps || cellProps) && (
+        <Suspense fallback={<div className="fixed inset-0 z-[70] grid place-items-center bg-white/60 text-sm text-slate-500">Loading…</div>}>
+          {tableProps && (
+            <TablePropsDialog initial={tableProps} onClose={() => setTableProps(null)} onSave={applyTableProps} />
+          )}
+          {rowProps && (
+            <RowPropsDialog initial={rowProps} onClose={() => setRowProps(null)} onSave={applyRowProps} />
+          )}
+          {cellProps && (
+            <CellPropsDialog initial={cellProps} onClose={() => setCellProps(null)} onSave={applyCellProps} />
+          )}
+        </Suspense>
       )}
 
       {/* Image right-click menu: Image… (Insert/Edit dialog) · Edit image (editor). */}

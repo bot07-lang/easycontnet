@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react';
 import { getMarkRange } from '@tiptap/core';
-import { useEffect, useId, useReducer, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useId, useReducer, useRef, useState } from 'react';
 import { BlockTypeMenu, useClickAway } from './toolbar-parts';
 import { useOverflowsRight } from '../lib/overflow';
 import { ImageDialog, type ImageValue, type LinkedImage } from './ImageDialog';
@@ -10,10 +10,12 @@ import { TextHighlightColorPicker } from './TextHighlightColorPicker';
 import { TableMenu } from './TableMenu';
 import { LinkDialog, type LinkValues, type LinkedFile } from './LinkDialog';
 import { toast } from '../lib/toast';
-import { MediaDialog } from './MediaDialog';
 import { isSafeUrl } from './editor-extensions';
-import { SpecialCharDialog } from './SpecialCharDialog';
-import { FindReplaceDialog } from './FindReplaceDialog';
+
+// Media / Special character / Find & Replace are opened rarely — lazy.
+const MediaDialog = lazy(() => import('./MediaDialog').then((m) => ({ default: m.MediaDialog })));
+const SpecialCharDialog = lazy(() => import('./SpecialCharDialog').then((m) => ({ default: m.SpecialCharDialog })));
+const FindReplaceDialog = lazy(() => import('./FindReplaceDialog').then((m) => ({ default: m.FindReplaceDialog })));
 
 /**
  * Two-row toolbar plus menu bar.
@@ -728,10 +730,14 @@ export function EditorToolbar({
       {preview && <PreviewModal html={editor.getHTML()} onClose={() => setPreview(false)} />}
       {confirmNew && <ConfirmNew onCancel={() => setConfirmNew(false)} onConfirm={newDocument} />}
       {sourceOpen && <SourceCodeModal initial={editor.getHTML()} onApply={applySource} onClose={() => setSourceOpen(false)} />}
-      {specialOpen && <SpecialCharDialog onPick={insertChar} onClose={() => setSpecialOpen(false)} />}
       {linkOpen && <LinkDialog initial={linkInit} onSave={applyLink} onClose={() => setLinkOpen(false)} linkedFiles={linkedFiles} />}
-      {mediaOpen && <MediaDialog onSave={applyMedia} onClose={() => setMediaOpen(false)} />}
-      {findOpen && <FindReplaceDialog editor={editor} onClose={() => setFindOpen(false)} />}
+      {(specialOpen || mediaOpen || findOpen) && (
+        <Suspense fallback={<div className="fixed inset-0 z-[70] grid place-items-center bg-white/60 text-sm text-slate-500">Loading…</div>}>
+          {specialOpen && <SpecialCharDialog onPick={insertChar} onClose={() => setSpecialOpen(false)} />}
+          {mediaOpen && <MediaDialog onSave={applyMedia} onClose={() => setMediaOpen(false)} />}
+          {findOpen && <FindReplaceDialog editor={editor} onClose={() => setFindOpen(false)} />}
+        </Suspense>
+      )}
 
       {/* Insert Image dialog — rendered LAST, AFTER the BubbleMenu. A
           conditional sibling placed BEFORE the tippy-relocated BubbleMenu

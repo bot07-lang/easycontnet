@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ApiItem, type ItemVersion, type StoredFile } from '../lib/api';
-import { CompareDialog, DIFF_CSS } from './CompareDialog';
+import { DIFF_CSS } from './diff-css';
+
+// Compare versions is opened rarely and pulls in the HTML-diff machinery —
+// lazy, so it's not part of every item-editor page load.
+const CompareDialog = lazy(() => import('./CompareDialog').then((m) => ({ default: m.CompareDialog })));
 import { fieldValueToHtml, isDiffableField } from '../lib/diff-fields';
 import { buildItemHtml, downloadText, exportDateLabel } from '../lib/export-html';
 import * as saveManager from '../lib/save-manager';
@@ -795,13 +799,15 @@ function VersionsTab({
       </div>
 
       {compareOpen && (
-        <CompareDialog
-          item={item}
-          projectId={projectId}
-          versions={list}
-          onClose={() => setCompareOpen(false)}
-          onRestored={() => { setCompareOpen(false); void qc.invalidateQueries({ queryKey: ['versions', item.id] }); onReload(); }}
-        />
+        <Suspense fallback={<div className="fixed inset-0 z-[70] grid place-items-center bg-white/60 text-sm text-slate-500">Loading…</div>}>
+          <CompareDialog
+            item={item}
+            projectId={projectId}
+            versions={list}
+            onClose={() => setCompareOpen(false)}
+            onRestored={() => { setCompareOpen(false); void qc.invalidateQueries({ queryKey: ['versions', item.id] }); onReload(); }}
+          />
+        </Suspense>
       )}
 
       {copyId && (
