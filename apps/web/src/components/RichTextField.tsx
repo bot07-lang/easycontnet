@@ -688,21 +688,41 @@ function ImgBtn({
   disabled?: boolean;
   children: React.ReactNode;
 }) {
+  // Real hover state, not CSS `group-hover` — these buttons sit only ~8px
+  // apart, so a pure-CSS tooltip on each one fades in/out independently as
+  // the cursor sweeps across the row, and several overlap mid-transition
+  // (the bug this replaces: a garbled stack of every button's label at
+  // once). State means exactly one tooltip is ever mounted.
+  const [hovered, setHovered] = useState(false);
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      // Keep the image selected — stop the editor blurring on button mousedown, so
-      // the handlers still see the selected image (src/attrs).
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
-      disabled={disabled}
-      className="grid h-8 w-8 place-items-center rounded text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+    <span
+      className="relative inline-flex"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-        {children}
-      </svg>
-    </button>
+      <button
+        type="button"
+        aria-label={title}
+        // Keep the image selected — stop the editor blurring on button mousedown, so
+        // the handlers still see the selected image (src/attrs).
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onClick}
+        disabled={disabled}
+        className="grid h-8 w-8 place-items-center rounded text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          {children}
+        </svg>
+      </button>
+      {/* Instant hover tooltip — the native `title` attribute this replaces
+          has a ~1s browser delay before it appears. */}
+      {hovered && !disabled && (
+        <span role="tooltip"
+              className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-800 px-2.5 py-1.5 text-[12px] font-medium text-white shadow-lg">
+          {title}
+          <span className="absolute bottom-full left-1/2 h-0 w-0 -translate-x-1/2 border-x-4 border-b-4 border-x-transparent border-b-slate-800" />
+        </span>
+      )}
+    </span>
   );
 }

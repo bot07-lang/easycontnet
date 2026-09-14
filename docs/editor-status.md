@@ -79,11 +79,26 @@ red/green, "Switch to split view" toggle, Restore) → wire the disabled button.
 - Editor header **status is read-only** — no status transition from inside the
   editor (status changes currently happen from the content-items table).
 
-### 5. Advanced table operations (Table menu stubs)
-Basic table editing works; these are hard-disabled:
-- Table of contents (Insert menu).
-- Cell properties, Row properties, Table properties.
-- Cut/Copy/Paste **row**, Cut/Copy/Paste **column**.
+### 5. Advanced table operations — built, UI not verified against EasyContent
+All previously-disabled table menu stubs are now wired up:
+- **Table of contents** (Insert menu) — live, self-updating list of the
+  document's headings; click a row to jump to it.
+- **Cell properties** — vertical align + background color, own dialog.
+- **Row properties** — height + background color, own dialog.
+- **Table properties** — was already built (triggered from the selection
+  bubble menu) but the Table menu's own entry pointed nowhere; now wired to
+  the same dialog.
+- **Cut/Copy/Paste row / column** — in-memory clipboard (`editor-table-ops.ts`,
+  built on prosemirror-tables' `TableMap`). Content-only: a copied cell's
+  colspan/rowspan isn't preserved on paste, since paste always lands in the
+  single-width cells a fresh insert creates.
+
+Row/column clipboard logic is verified against a real Tiptap editor (jsdom
+test, not committed). The Cell/Row/Table Properties **dialogs' fields, labels,
+and layout are this session's own design** — not checked against EasyContent's
+actual reference UI, per project convention (`.claude/skills/ec-feature-parity`).
+User confirmed keeping it as-is rather than gathering the reference and
+rebuilding to match.
 
 ### 6. Top-bar features EasyContent has, ours doesn't
 - **Share** — not built.

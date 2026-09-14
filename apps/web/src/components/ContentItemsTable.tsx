@@ -7,6 +7,7 @@ import { CreateItemDialog } from './CreateItemDialog';
 import { getItemCategories, setItemCategories, getProjectCategories } from '../lib/categories-store';
 import { TimelineHover } from './ItemTimeline';
 import { avatarColor, avatarInitial } from '../lib/avatar';
+import { HoverTip } from './HoverTip';
 import { downloadItemHtml } from '../lib/export-html';
 import { toast } from '../lib/toast';
 
@@ -510,15 +511,17 @@ function Row({
         const avatars = disp.kind === 'avatars' && (
           <span className="flex -space-x-2">
             {disp.avatars.map((a, i) => (
-              <span key={i} title={a.name}
-                    className={`grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[11px] font-semibold text-white ${a.dim ? 'opacity-40' : ''}`}
-                    style={{ background: avatarColor(a.name) }}>{avatarInitial(a.name)}</span>
+              <HoverTip key={i} label={a.name}>
+                <span className={`grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[11px] font-semibold text-white ${a.dim ? 'opacity-40' : ''}`}
+                      style={{ background: avatarColor(a.name) }}>{avatarInitial(a.name)}</span>
+              </HoverTip>
             ))}
             {disp.overflow > 0 && (
-              <span title={disp.overflowNames.join(', ')}
-                    className="grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-semibold text-slate-600">
-                +{disp.overflow}
-              </span>
+              <HoverTip label={disp.overflowNames.join(', ')}>
+                <span className="grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-semibold text-slate-600">
+                  +{disp.overflow}
+                </span>
+              </HoverTip>
             )}
           </span>
         );

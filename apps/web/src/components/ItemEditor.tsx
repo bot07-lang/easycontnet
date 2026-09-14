@@ -17,6 +17,7 @@ import { toPlainText } from '../lib/counts';
 import { useMe } from '../lib/session';
 import { useItemPresence, type Peer } from '../lib/presence';
 import { avatarColor, avatarInitial } from '../lib/avatar';
+import { HoverTip } from './HoverTip';
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'retrying' | 'error';
 
@@ -633,14 +634,15 @@ function FieldLock({ name }: { name: string }) {
 function Viewers({ peers }: { peers: Peer[] }) {
   if (peers.length === 0) return null;
   return (
-    <div className="flex items-center gap-1.5" title={`${peers.map((p) => p.name).join(', ')} also here`}>
+    <div className="flex items-center gap-1.5">
       <div className="flex -space-x-2">
         {peers.slice(0, 4).map((p) => (
-          <span key={p.userId} title={p.name}
-                className="grid h-7 w-7 place-items-center rounded-full border-2 border-white text-[11px] font-semibold text-white"
-                style={{ background: avatarColor(p.name) }}>
-            {avatarInitial(p.name)}
-          </span>
+          <HoverTip key={p.userId} label={p.name}>
+            <span className="grid h-7 w-7 place-items-center rounded-full border-2 border-white text-[11px] font-semibold text-white"
+                  style={{ background: avatarColor(p.name) }}>
+              {avatarInitial(p.name)}
+            </span>
+          </HoverTip>
         ))}
         {peers.length > 4 && (
           <span className="grid h-7 w-7 place-items-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-semibold text-slate-600">

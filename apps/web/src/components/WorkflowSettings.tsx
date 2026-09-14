@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type WorkflowConfig, type WorkflowStatus, type WorkflowRating } from '../lib/api';
 import { toast } from '../lib/toast';
+import { HoverTip } from './HoverTip';
 
 /**
  * The per-project Workflow settings page (CONFIG → Workflow). Mirrors the
@@ -256,9 +257,11 @@ function StatusEditRow({
           <AnchoredPanel anchorRef={colorBtn} onClose={() => setColorOpen(false)}>
             <div className="flex w-40 flex-wrap gap-2 p-2">
               {SWATCHES.map((c) => (
-                <button key={c} type="button" onClick={() => { setColor(c); setColorOpen(false); }}
-                        className={`h-6 w-6 rounded-full ${color === c ? 'ring-2 ring-slate-800 ring-offset-1' : ''}`}
-                        style={{ background: c }} title={c} />
+                <HoverTip key={c} label={c}>
+                  <button type="button" onClick={() => { setColor(c); setColorOpen(false); }}
+                          className={`h-6 w-6 rounded-full ${color === c ? 'ring-2 ring-slate-800 ring-offset-1' : ''}`}
+                          style={{ background: c }} />
+                </HoverTip>
               ))}
             </div>
           </AnchoredPanel>
@@ -568,9 +571,10 @@ function Avatars({ people }: { people: { id: string; name: string }[] }) {
   return (
     <span className="flex -space-x-2">
       {people.slice(0, 4).map((a) => (
-        <span key={a.id} title={a.name}
-              className="grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[10px] font-semibold text-white"
-              style={{ background: avatarColor(a.name) }}>{initials(a.name)}</span>
+        <HoverTip key={a.id} label={a.name}>
+          <span className="grid h-6 w-6 place-items-center rounded-full border-2 border-white text-[10px] font-semibold text-white"
+                style={{ background: avatarColor(a.name) }}>{initials(a.name)}</span>
+        </HoverTip>
       ))}
     </span>
   );

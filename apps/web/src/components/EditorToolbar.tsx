@@ -23,6 +23,25 @@ import { FindReplaceDialog } from './FindReplaceDialog';
  * prop change; we subscribe to transactions and force the update ourselves.
  */
 
+/** A small, instant hover tooltip — real state, not CSS `group-hover`. These
+ *  buttons sit only a few pixels apart in dense toolbar rows, so a pure-CSS
+ *  fade lets a fast mouse sweep leave several tooltips visible at once (the
+ *  bug: a garbled stack of every button's label, all mid-transition
+ *  simultaneously). State means exactly one is ever mounted, and dropping
+ *  the native `title` attribute also drops its own ~1s hover delay. */
+function HoverLabel({ label, hovered, align = 'center' }: { label: string; hovered: boolean; align?: 'center' | 'left' | 'right' }) {
+  if (!hovered) return null;
+  const pos = align === 'left' ? 'left-0' : align === 'right' ? 'right-0' : 'left-1/2 -translate-x-1/2';
+  const arrowPos = align === 'left' ? 'left-2.5' : align === 'right' ? 'right-2.5' : 'left-1/2 -translate-x-1/2';
+  return (
+    <span role="tooltip"
+          className={`pointer-events-none absolute top-full z-30 mt-2 ${pos} whitespace-nowrap rounded-md bg-slate-800 px-2.5 py-1.5 text-[12px] font-medium text-white shadow-lg`}>
+      {label}
+      <span className={`absolute bottom-full h-0 w-0 border-x-4 border-b-4 border-x-transparent border-b-slate-800 ${arrowPos}`} />
+    </span>
+  );
+}
+
 function Btn({
   onClick, active, disabled, title, children, wide,
 }: {
@@ -33,24 +52,27 @@ function Btn({
   children: React.ReactNode;
   wide?: boolean;
 }) {
+  const [hovered, setHovered] = useState(false);
   return (
-    <button
-      type="button"
-      onMouseDown={(e) => e.preventDefault()} // keep the editor selection
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      aria-label={title}
-      aria-pressed={active}
-      className={[
-        'flex h-8 items-center justify-center rounded text-slate-700 transition',
-        wide ? 'gap-1.5 px-2' : 'w-8',
-        disabled ? 'cursor-not-allowed opacity-30' : 'hover:bg-slate-200',
-        active ? 'bg-slate-300' : '',
-      ].join(' ')}
-    >
-      {children}
-    </button>
+    <span className="relative inline-flex" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()} // keep the editor selection
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={title}
+        aria-pressed={active}
+        className={[
+          'flex h-8 items-center justify-center rounded text-slate-700 transition',
+          wide ? 'gap-1.5 px-2' : 'w-8',
+          disabled ? 'cursor-not-allowed opacity-30' : 'hover:bg-slate-200',
+          active ? 'bg-slate-300' : '',
+        ].join(' ')}
+      >
+        {children}
+      </button>
+      <HoverLabel label={title} hovered={hovered && !disabled} />
+    </span>
   );
 }
 
@@ -70,24 +92,27 @@ function BubBtn({
   onClick?: () => void;
   children: React.ReactNode;
 }) {
+  const [hovered, setHovered] = useState(false);
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      aria-pressed={active}
-      onMouseDown={(e) => e.preventDefault()} // keep the editor selection
-      onClick={onClick}
-      disabled={disabled}
-      className={[
-        'flex h-8 min-w-8 items-center justify-center gap-0.5 rounded px-1.5 text-slate-700 transition',
-        disabled ? 'cursor-not-allowed opacity-30' : 'hover:bg-slate-100',
-        active ? 'bg-slate-200' : '',
-      ].join(' ')}
-    >
-      {children}
-      {caret && <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z" /></svg>}
-    </button>
+    <span className="relative inline-flex" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+      <button
+        type="button"
+        aria-label={title}
+        aria-pressed={active}
+        onMouseDown={(e) => e.preventDefault()} // keep the editor selection
+        onClick={onClick}
+        disabled={disabled}
+        className={[
+          'flex h-8 min-w-8 items-center justify-center gap-0.5 rounded px-1.5 text-slate-700 transition',
+          disabled ? 'cursor-not-allowed opacity-30' : 'hover:bg-slate-100',
+          active ? 'bg-slate-200' : '',
+        ].join(' ')}
+      >
+        {children}
+        {caret && <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z" /></svg>}
+      </button>
+      <HoverLabel label={title} hovered={hovered && !disabled} />
+    </span>
   );
 }
 
@@ -748,20 +773,21 @@ function OverflowMenu({
   children: (close: () => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const ref = useClickAway(() => setOpen(false));
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       <button
         type="button"
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((v) => !v)}
-        title={title}
         aria-label={title}
         className={`flex h-8 items-center gap-0.5 rounded px-1.5 text-slate-700 transition hover:bg-slate-200 ${open ? 'bg-slate-200' : ''}`}
       >
         {icon}
         <span className="text-[9px] leading-none text-slate-500">▾</span>
       </button>
+      <HoverLabel label={title} hovered={hovered && !open} />
       {open && <Dropdown width={width} align={align}>{children(() => setOpen(false))}</Dropdown>}
     </div>
   );
