@@ -23,6 +23,19 @@ export function buildImageFrame(
   const wrap = document.createElement('span');
   wrap.className = 'cw-img-wrap';
   wrap.contentEditable = 'false';
+  // A custom node view's DOM doesn't automatically pick up the node spec's
+  // `draggable: true` (default for Image), unlike default, non-nodeView
+  // rendering — same gotcha already fixed for embeds (editor-extensions.ts).
+  // Without this, dragging the image to reposition it does nothing: the
+  // browser's native image-drag takes over instead of ProseMirror's own
+  // node-move handling, so nothing in the document model actually changes
+  // and the image snaps back to its original spot on drop.
+  wrap.draggable = true;
+  // <img> is natively draggable in every browser regardless of any attribute
+  // — without turning that off, its own default drag can win over the
+  // wrapper's, dragging out the raw image file/URL instead of moving the
+  // node within the document.
+  img.draggable = false;
   wrap.appendChild(img);
 
   // At most one drag is ever in progress for this frame; tracked so `destroy`

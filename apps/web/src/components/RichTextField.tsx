@@ -522,6 +522,18 @@ export function RichTextField({
     setCellProps(null);
   };
 
+  // Which alignment mechanism applies to the currently-selected image — see
+  // the long comment at the Align buttons below for why these differ.
+  const isFigure = editor.isActive('figure');
+  const figureAlign = editor.getAttributes('figure').align as string | null;
+  const setImageAlign = (value: 'left' | 'center' | 'right') => {
+    if (editor.isActive('figure')) {
+      editor.chain().focus().updateAttributes('figure', { align: value === 'left' ? null : value }).run();
+    } else {
+      editor.chain().focus().setTextAlign(value).run();
+    }
+  };
+
   // Toolbar is always visible on rich fields. Focus-based show/hide proved
   // fragile under React StrictMode (the editor is torn down and rebuilt, so
   // focus listeners land on stale instances); a persistent toolbar is the
@@ -553,21 +565,27 @@ export function RichTextField({
         tippyOptions={{ placement: 'top', zIndex: 40 }}
       >
         <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
-          {/* Positions the image within its line by centering/right-aligning
-              the paragraph it sits in (setTextAlign — the same command the
-              toolbar's Alignment dropdown uses). Lives here too, not just in
-              that far-off dropdown, since this is where people actually look
-              right after selecting an image. */}
-          <ImgBtn title="Align left" active={editor.isActive({ textAlign: 'left' })}
-                  onClick={() => editor.chain().focus().setTextAlign('left').run()}>
+          {/* Positions the selected image within its line. A plain image is
+              inline inside a paragraph, so this is the paragraph's own
+              text-align (setTextAlign — same command the toolbar's Alignment
+              dropdown uses). A captioned image (figure) is its own top-level
+              block with no paragraph to inherit alignment from — and
+              text-align wouldn't move it even if it had one, since figure is
+              `display: table`, not inline — so it gets its own `align`
+              attribute instead (editor-figure.ts), applied as real margins
+              in CSS. Lives here, not just in that far-off dropdown, since
+              this is where people actually look right after selecting an
+              image. */}
+          <ImgBtn title="Align left" active={isFigure ? !figureAlign || figureAlign === 'left' : editor.isActive({ textAlign: 'left' })}
+                  onClick={() => setImageAlign('left')}>
             <path d="M3 6h18M3 12h12M3 18h16" />
           </ImgBtn>
-          <ImgBtn title="Align center" active={editor.isActive({ textAlign: 'center' })}
-                  onClick={() => editor.chain().focus().setTextAlign('center').run()}>
+          <ImgBtn title="Align center" active={isFigure ? figureAlign === 'center' : editor.isActive({ textAlign: 'center' })}
+                  onClick={() => setImageAlign('center')}>
             <path d="M3 6h18M6 12h12M4 18h16" />
           </ImgBtn>
-          <ImgBtn title="Align right" active={editor.isActive({ textAlign: 'right' })}
-                  onClick={() => editor.chain().focus().setTextAlign('right').run()}>
+          <ImgBtn title="Align right" active={isFigure ? figureAlign === 'right' : editor.isActive({ textAlign: 'right' })}
+                  onClick={() => setImageAlign('right')}>
             <path d="M3 6h18M9 12h12M5 18h16" />
           </ImgBtn>
           <span className="mx-1 h-6 w-px bg-slate-200" />

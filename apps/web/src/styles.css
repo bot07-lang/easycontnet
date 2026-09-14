@@ -66,6 +66,17 @@
 /* Selecting the figure OR focusing the caption outlines the whole figure. */
 .prose-editor figure.image.ProseMirror-selectednode,
 .prose-editor figure.image:focus-within { outline: 2px solid #4f9bf5; outline-offset: 2px; }
+/* A captioned image's `display: table` box shrinks to its content width like
+   inline-block — but unlike inline-block, `text-align` does NOT move a table
+   box (it only positions inline content). figure is also its own top-level
+   block (a sibling of paragraphs, not nested inside one), so there's no
+   surrounding paragraph to inherit alignment from anyway. The figure carries
+   its OWN data-align attribute instead (editor-figure.ts) — turned into real
+   horizontal margins here. A plain (uncaptioned) image doesn't need this —
+   it's wrapped in .cw-img-wrap, which IS inline-block and already centers
+   correctly under its paragraph's text-align. */
+.prose-editor figure.image[data-align="center"] { margin-left: auto; margin-right: auto; }
+.prose-editor figure.image[data-align="right"] { margin-left: auto; margin-right: 0; }
 .prose-editor blockquote {
   border-left: 3px solid #9ca3af; padding: .1rem 0 .1rem 1.6rem; margin: 1rem 0;
   color: #6b7280; font-style: italic;
