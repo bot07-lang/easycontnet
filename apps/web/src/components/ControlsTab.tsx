@@ -4,6 +4,7 @@ import { api, type ApiItem, type AssignmentStatus } from '../lib/api';
 import { getItemCategories, setItemCategories, getProjectCategories, useCategories } from '../lib/categories-store';
 import { AssignDialog } from './AssignDialog';
 import { avatarColor, avatarInitial } from '../lib/avatar';
+import { toast } from '../lib/toast';
 
 /**
  * The CONTROLS tab of the item editor's right rail — ITEM DETAILS + WORKFLOW,
@@ -55,6 +56,7 @@ export function ControlsTab({
       void qc.invalidateQueries({ queryKey: ['versions', item.id] });
       onReload();
     },
+    onError: () => toast('Could not change this item’s status — you may not have permission.'),
   });
 
   const statuses = assignment.data?.statuses ?? [];
@@ -84,6 +86,7 @@ export function ControlsTab({
       description: draftDesc,
     }),
     onSuccess: () => { setEditing(false); void qc.invalidateQueries({ queryKey: ['item', item.id] }); onReload(); },
+    onError: () => toast('Could not save these changes — you may not have permission.'),
   });
 
   // Highlight-in-text toggle. `item.keywords` are the tokens (each may carry a

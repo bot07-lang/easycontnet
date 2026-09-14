@@ -8,6 +8,7 @@ import {
   isDiffableField,
   type DiffFieldMeta,
 } from '../lib/diff-fields';
+import { toast } from '../lib/toast';
 
 /**
  * Compare two versions of an item, field by field, with formatting preserved.
@@ -115,6 +116,7 @@ export function CompareDialog({
       setRestoreModal(null);
       onRestored();
     },
+    onError: () => toast('Could not restore this version — you may not have permission.'),
   });
 
   const loading = (a.id !== CURRENT && aSnap.isLoading) || (b.id !== CURRENT && bSnap.isLoading);
