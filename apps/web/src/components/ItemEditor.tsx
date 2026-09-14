@@ -666,11 +666,11 @@ function ReadOnlyField({ label, html }: { label: string; html: string }) {
 }
 
 /**
- * Right-sidebar with the Controls / Comments / Versions tabs. Only Versions is
- * built (Controls = workflow actions, Comments = Phase 2 — both stubbed). The
- * Versions tab mirrors the reference: Compare, All/Named sub-tabs, versions
- * grouped by date, each with a kind badge, author + role, status dot, and a
- * three-dot menu (rename / restore).
+ * Right-sidebar with the Controls / Comments / Versions tabs — all three are
+ * built. Versions mirrors the reference: Compare, All/Named sub-tabs,
+ * versions grouped by date, each with a kind badge, author + role, status
+ * dot, and a three-dot menu (rename / restore). Controls handles workflow
+ * status changes, assignees, and brief editing. Comments is CommentPanel.tsx.
  */
 function VersionsPanel({
   item, projectId, onReload, onOpenItem, onOpenTemplate, tab, onTab, highlightKeywords, onSetHighlight, mainContentText, previewId, onPreview, onRestoreAsk, onBeforeStatusChange,

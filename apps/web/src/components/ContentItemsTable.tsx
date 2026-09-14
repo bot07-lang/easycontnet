@@ -915,10 +915,14 @@ function MenuItem({
       : 'text-slate-700 hover:bg-slate-50';
   return (
     <button type="button" disabled={disabled} onClick={onClick}
-            title={disabled ? 'Coming soon' : undefined}
             className={`flex w-full items-center gap-3 px-4 py-2 text-left text-[14px] ${tone}`}>
       <ActionIcon icon={icon} />
       {label}
+      {/* Persistent badge, not a hover-only tooltip — visible without waiting,
+          matching ItemMenuOpt's "Soon" badge elsewhere in this same menu. */}
+      {disabled && (
+        <span className="ml-auto rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">Soon</span>
+      )}
     </button>
   );
 }
