@@ -78,7 +78,7 @@ export default function App() {
           </Suspense>
         </div>
       ) : (
-        <Workspace key={session.user.id} />
+        <Workspace key={session.user.id} onOpenTeam={() => setView('roles')} />
       )}
     </div>
   );
@@ -129,7 +129,7 @@ function SignedOut() {
   );
 }
 
-function Workspace() {
+function Workspace({ onOpenTeam }: { onOpenTeam: () => void }) {
   // The sidebar always has a project selected (defaults to the first). `showAll`
   // toggles the All Projects dashboard vs the selected project's view. The current
   // view is mirrored to the URL (below) so a browser reload returns to the same
@@ -225,7 +225,7 @@ function Workspace() {
             <ProjectView projectId={projectId} nav={nav} itemId={itemId}
                          onOpenItem={(id) => { setNav('content'); setItemId(id); }}
                          onOpenTemplate={openTemplate} openTemplateId={openTemplateId} onSetTemplate={setOpenTemplateId}
-                         onProjectDeleted={() => { setShowAll(true); setItemId(null); }} />
+                         onProjectDeleted={() => { setShowAll(true); setItemId(null); }} onOpenTeam={onOpenTeam} />
           )}
         </ErrorBoundary>
       </div>
@@ -234,7 +234,7 @@ function Workspace() {
 }
 
 function ProjectView({
-  projectId, nav, itemId, onOpenItem, onOpenTemplate, openTemplateId, onSetTemplate, onProjectDeleted,
+  projectId, nav, itemId, onOpenItem, onOpenTemplate, openTemplateId, onSetTemplate, onProjectDeleted, onOpenTeam,
 }: {
   projectId: string;
   nav: NavKey;
@@ -244,6 +244,7 @@ function ProjectView({
   openTemplateId: string | null;
   onSetTemplate: (id: string | null) => void;
   onProjectDeleted: () => void;
+  onOpenTeam: () => void;
 }) {
   const items = useQuery({
     queryKey: ['items', projectId],
@@ -256,7 +257,7 @@ function ProjectView({
       <div className="h-full overflow-y-auto p-6">
         <Suspense fallback={<LazyFallback />}>
           <ProjectDashboard key={projectId} projectId={projectId} onOpenItem={(id) => onOpenItem(id)}
-                            onProjectDeleted={onProjectDeleted} />
+                            onProjectDeleted={onProjectDeleted} onOpenTeam={onOpenTeam} />
         </Suspense>
       </div>
     );

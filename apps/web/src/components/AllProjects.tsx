@@ -4,6 +4,7 @@ import { api, type DashboardProject, type DashboardMyItem } from '../lib/api';
 import { CreateProjectDialog } from './CreateProjectDialog';
 import { toast } from '../lib/toast';
 import { HoverTip } from './HoverTip';
+import { MemberPickerButton } from './MemberPicker';
 
 type SortKey = 'created' | 'active' | 'name' | 'items' | 'overdue';
 const SORTS: { key: SortKey; label: string }[] = [
@@ -229,6 +230,7 @@ function ProjectsSection({
 
                 <MyItemsBadge count={p.my_items_count} />
                 <MemberAvatars members={p.members} />
+                <MemberPickerButton projectId={p.id} />
 
                 <div className="ml-auto flex items-center gap-4">
                   <div className="flex flex-col items-end">
@@ -528,7 +530,10 @@ function ProjectCard({ project, onOpen }: { project: DashboardProject; onOpen: (
       </p>
 
       <div className="mt-auto space-y-3">
-        <MemberAvatars members={project.members} />
+        <div className="flex items-center gap-2">
+          <MemberAvatars members={project.members} />
+          <MemberPickerButton projectId={project.id} />
+        </div>
         <div className="flex items-center gap-2">
           <MyItemsBadge count={project.my_items_count} />
         </div>

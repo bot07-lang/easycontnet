@@ -23,10 +23,12 @@ export function ProjectDashboard({
   projectId,
   onOpenItem,
   onProjectDeleted,
+  onOpenTeam,
 }: {
   projectId: string;
   onOpenItem: (id: string) => void;
   onProjectDeleted: () => void;
+  onOpenTeam: () => void;
 }) {
   const [showSettings, setShowSettings] = useState(false);
   const { data, isLoading, error } = useQuery({
@@ -56,6 +58,10 @@ export function ProjectDashboard({
         <h1 className="text-2xl font-semibold text-slate-900">{project.name}</h1>
         <div className="flex items-center gap-4">
           <MemberAvatars members={project.members} max={8} />
+          <button type="button" onClick={onOpenTeam}
+                  className="flex items-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            <IconTeam /> MANAGE TEAM
+          </button>
           <button type="button" onClick={() => setShowSettings(true)}
                   className="flex items-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
             <IconGear /> SETTINGS
@@ -302,6 +308,16 @@ function avatarColorFor(name: string): string {
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return palette[h % palette.length]!;
+}
+
+function IconTeam() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13A4 4 0 0 1 16 11" />
+    </svg>
+  );
 }
 
 function IconGear() {
