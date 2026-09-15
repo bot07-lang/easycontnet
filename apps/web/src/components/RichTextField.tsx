@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useId, useReducer, useRef, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import type { Editor } from '@tiptap/core';
@@ -325,6 +325,28 @@ export function RichTextField({
   useEffect(() => {
     editor?.setEditable(editable, false);
   }, [editor, editable]);
+
+  // isFigure/figureAlign below and the image BubbleMenu's Align Left/Center/
+  // Right `active` props (editor.isActive(...)) are read directly during
+  // render — v3 no longer re-renders this component on a selection-only
+  // change (moving the cursor between two differently-aligned images,
+  // nothing typed) by default, so without this they'd show stale state.
+  // Scoped locally rather than useEditor's shouldRerenderOnTransaction: that
+  // flag re-renders the whole tree including EditorToolbar, which already
+  // has its own identical subscription — the two together caused "Maximum
+  // update depth exceeded". This mirrors EditorToolbar's own mechanism but
+  // as an independent local subscription, so neither can trigger the other.
+  const [, forceRender] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (!editor) return;
+    const update = () => forceRender();
+    editor.on('transaction', update);
+    editor.on('selectionUpdate', update);
+    return () => {
+      editor.off('transaction', update);
+      editor.off('selectionUpdate', update);
+    };
+  }, [editor]);
 
   // Push the active highlight keywords into the editor's decoration plugin.
   // Joined into a stable string so the effect only fires when they actually change.
