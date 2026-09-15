@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
   api,
   type ProjectDashboardActivity,
@@ -8,30 +8,41 @@ import {
   type ProjectDashboardUtilization,
   type ProjectDashboardVelocity,
 } from '../lib/api';
-import { MemberAvatars, RenameDialog, formatActivity } from './AllProjects';
+import { MemberAvatars, formatActivity } from './AllProjects';
+import { ProjectSettingsPage } from './ProjectSettingsPage';
 import { HoverTip } from './HoverTip';
 
 /**
  * The per-project "Dashboard" tab: header + members, "My items" scoped to
  * this project, a recent status-change activity feed, recent comments, the
- * workflow funnel, per-member item load, and average time-in-status.
- * Mirrors the reference's layout; there's no "Manage team" button — there's
- * no API yet to add/remove a project member after creation, so a button for
- * it would just be dead.
+ * workflow funnel, per-member item load, and average time-in-status. The
+ * SETTINGS button opens the real Project Settings page in place of the
+ * dashboard (rename, delete, and the "Assigned users" checklist).
  */
 export function ProjectDashboard({
   projectId,
   onOpenItem,
+  onProjectDeleted,
 }: {
   projectId: string;
   onOpenItem: (id: string) => void;
+  onProjectDeleted: () => void;
 }) {
-  const qc = useQueryClient();
-  const [renaming, setRenaming] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const { data, isLoading, error } = useQuery({
     queryKey: ['project-dashboard', projectId],
     queryFn: () => api.getProjectDashboard(projectId),
   });
+
+  if (showSettings) {
+    return (
+      <ProjectSettingsPage
+        projectId={projectId}
+        onBack={() => setShowSettings(false)}
+        onDeleted={onProjectDeleted}
+      />
+    );
+  }
 
   if (isLoading) return <p className="p-8 text-slate-400">Loading…</p>;
   if (error) return <p className="p-8 text-red-600">Can’t reach the API. Is it running on :3001?</p>;
@@ -45,20 +56,12 @@ export function ProjectDashboard({
         <h1 className="text-2xl font-semibold text-slate-900">{project.name}</h1>
         <div className="flex items-center gap-4">
           <MemberAvatars members={project.members} max={8} />
-          <button type="button" onClick={() => setRenaming(true)}
+          <button type="button" onClick={() => setShowSettings(true)}
                   className="flex items-center gap-2 rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
             <IconGear /> SETTINGS
           </button>
         </div>
       </div>
-
-      {renaming && (
-        <RenameDialog
-          project={project}
-          onClose={() => setRenaming(false)}
-          onDone={() => { setRenaming(false); qc.invalidateQueries({ queryKey: ['project-dashboard', projectId] }); }}
-        />
-      )}
 
       <section>
         <h2 className="mb-3 text-lg font-semibold text-slate-900">My Items</h2>

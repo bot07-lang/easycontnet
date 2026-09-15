@@ -224,7 +224,8 @@ function Workspace() {
           ) : (
             <ProjectView projectId={projectId} nav={nav} itemId={itemId}
                          onOpenItem={(id) => { setNav('content'); setItemId(id); }}
-                         onOpenTemplate={openTemplate} openTemplateId={openTemplateId} onSetTemplate={setOpenTemplateId} />
+                         onOpenTemplate={openTemplate} openTemplateId={openTemplateId} onSetTemplate={setOpenTemplateId}
+                         onProjectDeleted={() => { setShowAll(true); setItemId(null); }} />
           )}
         </ErrorBoundary>
       </div>
@@ -233,7 +234,7 @@ function Workspace() {
 }
 
 function ProjectView({
-  projectId, nav, itemId, onOpenItem, onOpenTemplate, openTemplateId, onSetTemplate,
+  projectId, nav, itemId, onOpenItem, onOpenTemplate, openTemplateId, onSetTemplate, onProjectDeleted,
 }: {
   projectId: string;
   nav: NavKey;
@@ -242,6 +243,7 @@ function ProjectView({
   onOpenTemplate: (templateId: string) => void;
   openTemplateId: string | null;
   onSetTemplate: (id: string | null) => void;
+  onProjectDeleted: () => void;
 }) {
   const items = useQuery({
     queryKey: ['items', projectId],
@@ -253,7 +255,8 @@ function ProjectView({
     return (
       <div className="h-full overflow-y-auto p-6">
         <Suspense fallback={<LazyFallback />}>
-          <ProjectDashboard key={projectId} projectId={projectId} onOpenItem={(id) => onOpenItem(id)} />
+          <ProjectDashboard key={projectId} projectId={projectId} onOpenItem={(id) => onOpenItem(id)}
+                            onProjectDeleted={onProjectDeleted} />
         </Suspense>
       </div>
     );

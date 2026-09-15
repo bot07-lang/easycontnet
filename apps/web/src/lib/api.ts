@@ -251,6 +251,13 @@ export interface OrgUser {
   role_name: string;
 }
 
+export interface ProjectSettings {
+  id: string;
+  name: string;
+  description: string | null;
+  memberIds: string[];
+}
+
 export interface WorkflowRole {
   id: string;
   name: string;
@@ -407,6 +414,9 @@ export const api = {
     }),
   renameProject: (id: string, name: string) =>
     request<{ ok: true }>(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  getProjectSettings: (id: string) => request<ProjectSettings>(`/projects/${id}`),
+  setProjectMembers: (id: string, profileIds: string[]) =>
+    request<{ ok: true }>(`/projects/${id}/members`, { method: 'PATCH', body: JSON.stringify({ profileIds }) }),
   archiveProject: (id: string) => request<{ ok: true }>(`/projects/${id}/archive`, { method: 'POST' }),
   restoreProject: (id: string) => request<{ ok: true }>(`/projects/${id}/restore`, { method: 'POST' }),
   deleteProject: (id: string) => request<{ ok: true }>(`/projects/${id}`, { method: 'DELETE' }),

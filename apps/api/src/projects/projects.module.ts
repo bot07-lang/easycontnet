@@ -61,6 +61,42 @@ class ProjectsController {
     });
   }
 
+  /** Project Settings page: name + current member ids (for the checklist). */
+  @Get(':id')
+  async getOne(@CurrentUser() user: UserContext, @Param('id') id: string) {
+    return this.db.withUser(user, async (c) => {
+      const { rows: [project] } = await c.query(
+        `select id, name, description from public.projects where id = $1`,
+        [id],
+      );
+      if (!project) throw new BadRequestException('Project not found');
+      const { rows: members } = await c.query(
+        `select profile_id from public.project_members where project_id = $1`,
+        [id],
+      );
+      return { ...project, memberIds: members.map((m) => m.profile_id as string) };
+    });
+  }
+
+  /**
+   * Replace this project's member list (Settings' "Assigned users" checklist).
+   * project_members has no insert/delete policy for the authenticated role —
+   * membership is only ever written through a SECURITY DEFINER function, same
+   * as at creation time (api_create_project).
+   */
+  @Patch(':id/members')
+  @RequirePermission('manage_projects')
+  async setMembers(
+    @CurrentUser() user: UserContext,
+    @Param('id') id: string,
+    @Body() body: { profileIds?: string[] },
+  ) {
+    return this.db.withUser(user, async (c) => {
+      await c.query(`select public.api_set_project_members($1, $2::uuid[])`, [id, body.profileIds ?? []]);
+      return { ok: true };
+    });
+  }
+
   /** Rename (Settings). RLS's update policy re-checks manage_projects. */
   @Patch(':id')
   @RequirePermission('manage_projects')
@@ -141,7 +177,7 @@ class UsersController {
            from public.profiles p
            join public.roles r on r.id = p.role_id
           where p.is_active
-          order by p.full_name`,
+          order by r.position nulls last, p.full_name`,
       );
       return rows;
     });

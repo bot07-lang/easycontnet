@@ -427,7 +427,7 @@ export function RenameDialog({
   );
 }
 
-function ConfirmDialog({
+export function ConfirmDialog({
   title, message, confirmLabel, onCancel, onConfirm,
 }: {
   title: string; message: string; confirmLabel: string;
