@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
-import { useEditor, EditorContent, BubbleMenu } from '@tiptap/react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react/menus';
+import type { Editor } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -82,17 +84,16 @@ const TitledLink = Link.extend({
   },
 });
 import TextAlign from '@tiptap/extension-text-align';
-import TextStyle from '@tiptap/extension-text-style';
+import { TextStyle } from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
 import Highlight from '@tiptap/extension-highlight';
 import { TableRowWithProps, TableCellWithProps, TableHeaderWithProps, type RowProps, type CellProps } from './editor-table-props';
 import Youtube from '@tiptap/extension-youtube';
-import Placeholder from '@tiptap/extension-placeholder';
+import { Placeholder } from '@tiptap/extensions';
 import Superscript from '@tiptap/extension-superscript';
 import Subscript from '@tiptap/extension-subscript';
 import FontFamily from '@tiptap/extension-font-family';
-import TaskList from '@tiptap/extension-task-list';
-import TaskItem from '@tiptap/extension-task-item';
+import { TaskList, TaskItem } from '@tiptap/extension-list';
 import { FontSize, LineHeight, Div, Indent, GenericEmbed, embedNodeView, isSafeUrl } from './editor-extensions';
 import { TableOfContents } from './editor-toc';
 import { Figure } from './editor-figure';
@@ -177,7 +178,11 @@ export function RichTextField({
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3, 4, 5, 6] } }),
+      // v3's StarterKit now bundles Underline and Link by default (both named
+      // the same as our own explicit extensions below — TitledLink customizes
+      // Link's href/title handling) — disabled here so ours are the only ones
+      // registered, not silently overridden by array order.
+      StarterKit.configure({ heading: { levels: [1, 2, 3, 4, 5, 6] }, underline: false, link: false }),
       Div,
       Underline,
       TitledLink.configure({ openOnClick: false, HTMLAttributes: { rel: 'noopener' } }),
@@ -216,6 +221,13 @@ export function RichTextField({
       TableOfContents,
       KeywordHighlight,
     ],
+    // v3 defaults this to false (a perf opt-in elsewhere). The toolbar reads
+    // editor.isActive(...)/editor.can()... directly during render (bold/italic/
+    // alignment button highlighting, disabled states) rather than through
+    // useEditorState, so it needs a re-render on every transaction — not just
+    // ones that change content — to stay in sync with the cursor/selection.
+    // This restores v2's actual default behavior; no functional change.
+    shouldRerenderOnTransaction: true,
     content: value,
     editable,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
@@ -543,13 +555,15 @@ export function RichTextField({
   void onActivate;
   return (
     <div className={fullscreen ? 'fixed inset-0 z-[60] flex flex-col bg-white' : ''}>
-      {/* The two BubbleMenus below are relocated to document.body by tippy, so any
-          CONDITIONAL sibling rendered BEFORE them (e.g. the toolbar, which only
-          mounts when editable) makes React insertBefore against a node that is no
-          longer a child of this div → "Failed to execute 'insertBefore'". The
-          toolbar is therefore rendered AFTER the BubbleMenus (its insertion
-          reference becomes the stable .rt-body div). Tippy portals the menus, so
-          this reorder does not change what the user sees. */}
+      {/* The two BubbleMenus below get their DOM element appendChild'd elsewhere
+          by Tiptap's bubble-menu plugin (the editor view's parent element, by
+          default — see @tiptap/extension-bubble-menu), so any CONDITIONAL
+          sibling rendered BEFORE them (e.g. the toolbar, which only mounts when
+          editable) makes React insertBefore against a node that is no longer a
+          child of this div → "Failed to execute 'insertBefore'". The toolbar is
+          therefore rendered AFTER the BubbleMenus (its insertion reference
+          becomes the stable .rt-body div). The plugin relocates the menus itself,
+          so this reorder does not change what the user sees. */}
 
       {/* Floating toolbar over a selected image: rotate ×2 · Edit Image ·
           Insert/Edit · Delete. Low z-index (40) so any dialog/editor (z-50+)
@@ -561,8 +575,9 @@ export function RichTextField({
       <BubbleMenu
         editor={editor}
         pluginKey={`image-bubble-${bubbleKey}`}
-        shouldShow={({ editor }) => editable && (editor.isActive('image') || editor.isActive('figure'))}
-        tippyOptions={{ placement: 'top', zIndex: 40 }}
+        shouldShow={({ editor }: { editor: Editor }) => editable && (editor.isActive('image') || editor.isActive('figure'))}
+        options={{ placement: 'top' }}
+        style={{ zIndex: 40 }}
       >
         <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
           {/* Positions the selected image within its line. A plain image is
@@ -615,8 +630,9 @@ export function RichTextField({
       <BubbleMenu
         editor={editor}
         pluginKey={`table-bubble-${bubbleKey}`}
-        shouldShow={({ editor }) => editable && editor.isActive('table')}
-        tippyOptions={{ placement: 'top', zIndex: 40 }}
+        shouldShow={({ editor }: { editor: Editor }) => editable && editor.isActive('table')}
+        options={{ placement: 'top' }}
+        style={{ zIndex: 40 }}
       >
         <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
           <ImgBtn title="Table properties" onClick={openTableProps}>

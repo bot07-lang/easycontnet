@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/react';
-import { BubbleMenu } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react/menus';
 import { getMarkRange } from '@tiptap/core';
 import { lazy, Suspense, useEffect, useId, useReducer, useRef, useState } from 'react';
 import { BlockTypeMenu, useClickAway } from './toolbar-parts';
@@ -284,7 +284,7 @@ export function EditorToolbar({
 
   // View › Source code — replace the field's HTML with the edited markup.
   const applySource = (html: string) => {
-    editor.commands.setContent(html, true);
+    editor.commands.setContent(html); // emitUpdate defaults to true in v3
     setSourceOpen(false);
   };
 
@@ -429,12 +429,13 @@ export function EditorToolbar({
       <BubbleMenu
         editor={editor}
         pluginKey={`text-bubble-${bubbleKey}`}
-        shouldShow={({ editor, state }) => {
+        shouldShow={({ editor, state }: { editor: Editor; state: Editor['state'] }) => {
           if (state.selection.empty) return false;
           if (editor.isActive('image') || editor.isActive('figure') || editor.isActive('table')) return false;
           return editor.isEditable;
         }}
-        tippyOptions={{ placement: 'top', zIndex: 45, maxWidth: 'none' }}
+        options={{ placement: 'top' }}
+        style={{ zIndex: 45, maxWidth: 'none' }}
       >
         <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
           <BubBtn title="Bold" active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()}>
@@ -740,8 +741,9 @@ export function EditorToolbar({
       )}
 
       {/* Insert Image dialog — rendered LAST, AFTER the BubbleMenu. A
-          conditional sibling placed BEFORE the tippy-relocated BubbleMenu
-          element crashes React reconciliation (insertBefore / NotFoundError);
+          conditional sibling placed BEFORE the BubbleMenu element — which
+          Tiptap's bubble-menu plugin appendChild's elsewhere in the DOM —
+          crashes React reconciliation (insertBefore / NotFoundError);
           appending at the end avoids that. */}
       {imageOpen && (
         <ImageDialog onClose={() => setImageOpen(false)} onSave={insertImage} onUpload={onUpload} linkedImages={linkedImages} />
