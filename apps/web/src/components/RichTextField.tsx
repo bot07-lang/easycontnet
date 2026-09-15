@@ -221,13 +221,6 @@ export function RichTextField({
       TableOfContents,
       KeywordHighlight,
     ],
-    // v3 defaults this to false (a perf opt-in elsewhere). The toolbar reads
-    // editor.isActive(...)/editor.can()... directly during render (bold/italic/
-    // alignment button highlighting, disabled states) rather than through
-    // useEditorState, so it needs a re-render on every transaction — not just
-    // ones that change content — to stay in sync with the cursor/selection.
-    // This restores v2's actual default behavior; no functional change.
-    shouldRerenderOnTransaction: true,
     content: value,
     editable,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
