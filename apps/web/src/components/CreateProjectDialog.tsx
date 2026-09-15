@@ -43,8 +43,14 @@ export function CreateProjectDialog({
     const close = (e: MouseEvent) => {
       if (!pickerRef.current?.contains(e.target as Node)) setPickerOpen(false);
     };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
+    // Capture phase: the dialog's own content wrapper calls stopPropagation()
+    // on every mousedown (so clicking inside it doesn't bubble to the
+    // backdrop and close the whole dialog) — a bubble-phase listener here
+    // would never fire for a click anywhere inside the dialog but outside
+    // the picker, leaving it stuck open. Capture runs on the way down,
+    // before that stopPropagation call happens during bubbling.
+    document.addEventListener('mousedown', close, true);
+    return () => document.removeEventListener('mousedown', close, true);
   }, [pickerOpen]);
 
   const toggle = (id: string) =>
