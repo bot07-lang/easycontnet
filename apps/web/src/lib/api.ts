@@ -184,6 +184,51 @@ export interface DashboardMyItem {
   status_name: string | null;
   status_color: string | null;
 }
+export interface ProjectDashboardMember {
+  id: string;
+  name: string;
+  role_name: string | null;
+}
+export interface ProjectDashboardActivity {
+  id: string;
+  created_at: string;
+  item_id: string;
+  item_number: number;
+  item_name: string;
+  to_status_name: string | null;
+  actor_name: string | null;
+  actor_role: string | null;
+}
+export interface ProjectDashboardFunnelSlice {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+  count: number;
+  pct: number;
+}
+export interface ProjectDashboardUtilization {
+  profile_id: string;
+  name: string;
+  role_name: string | null;
+  items_count: number;
+}
+export interface ProjectDashboardVelocity {
+  id: string;
+  name: string;
+  color: string;
+  avgSeconds30d: number | null;
+  avgSecondsPrev: number | null;
+}
+export interface ProjectDashboard {
+  project: { id: string; name: string; members: ProjectDashboardMember[] };
+  myItems: DashboardMyItem[];
+  recentActivity: ProjectDashboardActivity[];
+  workflowFunnel: ProjectDashboardFunnelSlice[];
+  teamUtilization: ProjectDashboardUtilization[];
+  workflowVelocity: ProjectDashboardVelocity[];
+}
+
 export interface Dashboard {
   projects: DashboardProject[];
   myItems: DashboardMyItem[];
@@ -340,6 +385,8 @@ export interface TemplateDetail {
 export const api = {
   getDashboard: (archived = false) =>
     request<Dashboard>(`/dashboard${archived ? '?archived=true' : ''}`),
+  getProjectDashboard: (projectId: string) =>
+    request<ProjectDashboard>(`/dashboard/project/${projectId}`),
   listProjects: () => request<ProjectSummary[]>('/projects'),
   listUsers: () => request<OrgUser[]>('/users'),
   createProject: (name: string, memberIds: string[]) =>

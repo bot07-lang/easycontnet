@@ -20,6 +20,7 @@ const TemplateBuilder = lazy(() => import('./components/TemplateBuilder').then((
 const CategoriesPage = lazy(() => import('./components/CategoriesPage').then((m) => ({ default: m.CategoriesPage })));
 const FilesPage = lazy(() => import('./components/FilesPage').then((m) => ({ default: m.FilesPage })));
 const RolesPage = lazy(() => import('./components/RolesPage').then((m) => ({ default: m.RolesPage })));
+const ProjectDashboard = lazy(() => import('./components/ProjectDashboard').then((m) => ({ default: m.ProjectDashboard })));
 
 function LazyFallback() {
   return <p className="p-8 text-sm text-slate-400">Loading…</p>;
@@ -247,6 +248,16 @@ function ProjectView({
     queryFn: () => api.listItems(projectId),
     enabled: nav === 'content',
   });
+
+  if (nav === 'dashboard') {
+    return (
+      <div className="h-full overflow-y-auto p-6">
+        <Suspense fallback={<LazyFallback />}>
+          <ProjectDashboard key={projectId} projectId={projectId} onOpenItem={(id) => onOpenItem(id)} />
+        </Suspense>
+      </div>
+    );
+  }
 
   if (nav === 'workflow') {
     return (

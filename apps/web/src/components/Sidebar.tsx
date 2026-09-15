@@ -14,7 +14,7 @@ export type NavKey =
 
 /** Which nav items have a real page today; the rest are placeholders. */
 export const IMPLEMENTED: Record<NavKey, boolean> = {
-  dashboard: false,
+  dashboard: true,
   content: true,
   briefs: false,
   files: true,

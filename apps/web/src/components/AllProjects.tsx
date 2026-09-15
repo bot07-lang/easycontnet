@@ -187,7 +187,7 @@ function ProjectsSection({
 
         <button type="button" onClick={() => setCreating(true)}
                 className="ml-auto flex items-center gap-2 rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700">
-          <span className="text-lg leading-none">+</span> New project
+          <span className="text-lg leading-none">+</span> NEW PROJECT
         </button>
       </div>
 
@@ -292,11 +292,11 @@ function MyItemsBadge({ count }: { count: number }) {
   );
 }
 
-function MemberAvatars({ members }: { members: { name: string }[] }) {
+export function MemberAvatars({ members, max = 4 }: { members: { name: string }[]; max?: number }) {
   if (members.length === 0) return <span className="text-[13px] text-slate-400">No members</span>;
   return (
     <div className="flex -space-x-2">
-      {members.slice(0, 4).map((m) => (
+      {members.slice(0, max).map((m) => (
         <HoverTip key={m.name} label={m.name}>
           <span className="grid h-7 w-7 place-items-center rounded-full border-2 border-white text-[10px] font-semibold text-white"
                 style={{ background: avatarColor(m.name) }}>
@@ -304,9 +304,9 @@ function MemberAvatars({ members }: { members: { name: string }[] }) {
           </span>
         </HoverTip>
       ))}
-      {members.length > 4 && (
+      {members.length > max && (
         <span className="grid h-7 w-7 place-items-center rounded-full border-2 border-white bg-slate-500 text-[10px] font-semibold text-white">
-          +{members.length - 4}
+          +{members.length - max}
         </span>
       )}
     </div>
@@ -395,10 +395,10 @@ function CardActions({ project }: { project: DashboardProject }) {
   );
 }
 
-function RenameDialog({
+export function RenameDialog({
   project, onClose, onDone,
 }: {
-  project: DashboardProject;
+  project: { id: string; name: string };
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -449,7 +449,7 @@ function ConfirmDialog({
   );
 }
 
-function Dialog({
+export function Dialog({
   title, onClose, children, footer,
 }: {
   title: string; onClose: () => void; children: React.ReactNode; footer: React.ReactNode;
@@ -474,7 +474,7 @@ function Dialog({
   );
 }
 
-function BtnGhost({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+export function BtnGhost({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button type="button" onClick={onClick}
             className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
@@ -482,7 +482,7 @@ function BtnGhost({ onClick, children }: { onClick: () => void; children: React.
     </button>
   );
 }
-function BtnPrimary({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+export function BtnPrimary({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
   return (
     <button type="button" onClick={onClick} disabled={disabled}
             className="rounded-md bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40">
@@ -527,15 +527,17 @@ function ProjectCard({ project, onOpen }: { project: DashboardProject; onOpen: (
         Last activity: {formatActivity(project.last_activity)}
       </p>
 
-      <div className="mt-auto flex items-center justify-between">
+      <div className="mt-auto space-y-3">
         <MemberAvatars members={project.members} />
-        <MyItemsBadge count={project.my_items_count} />
+        <div className="flex items-center gap-2">
+          <MyItemsBadge count={project.my_items_count} />
+        </div>
       </div>
     </div>
   );
 }
 
-function formatActivity(ts: string | null): string {
+export function formatActivity(ts: string | null): string {
   if (!ts) return 'No activity yet';
   const diff = Date.now() - new Date(ts).getTime();
   const mins = Math.floor(diff / 60000);
