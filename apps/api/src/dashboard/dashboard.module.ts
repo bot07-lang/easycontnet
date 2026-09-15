@@ -92,9 +92,10 @@ class DashboardController {
 
   /**
    * The per-project Dashboard tab: project header + members, "My items"
-   * scoped to this project, a recent status-change activity feed, the
-   * workflow funnel (every status, including zero-count ones), per-member
-   * item load, and average time-in-status (last 30 days vs. the 30 before).
+   * scoped to this project, a recent status-change activity feed, recent
+   * comments (the "Recent Messages & Comments" panel), the workflow funnel
+   * (every status, including zero-count ones), per-member item load, and
+   * average time-in-status (last 30 days vs. the 30 before).
    *
    * "Recent activity" and "Workflow velocity" both read from
    * content_item_versions (kind='status_change') — the single code path that
@@ -155,6 +156,20 @@ class DashboardController {
             where v.kind = 'status_change' and ci.project_id = $1
             order by v.created_at desc
             limit 30`,
+          [projectId],
+        )
+      ).rows;
+
+      const recentComments = (
+        await c.query(
+          `select c.id, c.created_at, c.body, c.resolved, c.item_id, ci.item_number,
+                  ci.name as item_name, pr.full_name as author_name
+             from public.comments c
+             join public.content_items ci on ci.id = c.item_id
+             left join public.profiles pr on pr.id = c.author_id
+            where ci.project_id = $1
+            order by c.created_at desc
+            limit 15`,
           [projectId],
         )
       ).rows;
@@ -252,7 +267,15 @@ class DashboardController {
         };
       });
 
-      return { project: { ...project, members }, myItems, recentActivity, workflowFunnel, teamUtilization, workflowVelocity };
+      return {
+        project: { ...project, members },
+        myItems,
+        recentActivity,
+        recentComments,
+        workflowFunnel,
+        teamUtilization,
+        workflowVelocity,
+      };
     });
   }
 }

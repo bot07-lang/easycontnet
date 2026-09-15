@@ -199,6 +199,16 @@ export interface ProjectDashboardActivity {
   actor_name: string | null;
   actor_role: string | null;
 }
+export interface ProjectDashboardComment {
+  id: string;
+  created_at: string;
+  body: string;
+  resolved: boolean;
+  item_id: string;
+  item_number: number;
+  item_name: string;
+  author_name: string | null;
+}
 export interface ProjectDashboardFunnelSlice {
   id: string;
   name: string;
@@ -224,6 +234,7 @@ export interface ProjectDashboard {
   project: { id: string; name: string; members: ProjectDashboardMember[] };
   myItems: DashboardMyItem[];
   recentActivity: ProjectDashboardActivity[];
+  recentComments: ProjectDashboardComment[];
   workflowFunnel: ProjectDashboardFunnelSlice[];
   teamUtilization: ProjectDashboardUtilization[];
   workflowVelocity: ProjectDashboardVelocity[];

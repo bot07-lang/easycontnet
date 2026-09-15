@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   api,
   type ProjectDashboardActivity,
+  type ProjectDashboardComment,
   type ProjectDashboardFunnelSlice,
   type ProjectDashboardUtilization,
   type ProjectDashboardVelocity,
@@ -12,12 +13,11 @@ import { HoverTip } from './HoverTip';
 
 /**
  * The per-project "Dashboard" tab: header + members, "My items" scoped to
- * this project, a recent status-change activity feed, the workflow funnel,
- * per-member item load, and average time-in-status. Mirrors the reference's
- * layout; "Recent Messages & Comments" stays an empty state until comments
- * exist (same reasoning as the All Projects page), and there's no "Manage
- * team" button — there's no API yet to add/remove a project member after
- * creation, so a button for it would just be dead.
+ * this project, a recent status-change activity feed, recent comments, the
+ * workflow funnel, per-member item load, and average time-in-status.
+ * Mirrors the reference's layout; there's no "Manage team" button — there's
+ * no API yet to add/remove a project member after creation, so a button for
+ * it would just be dead.
  */
 export function ProjectDashboard({
   projectId,
@@ -37,7 +37,7 @@ export function ProjectDashboard({
   if (error) return <p className="p-8 text-red-600">Can’t reach the API. Is it running on :3001?</p>;
   if (!data) return null;
 
-  const { project, myItems, recentActivity, workflowFunnel, teamUtilization, workflowVelocity } = data;
+  const { project, myItems, recentActivity, recentComments, workflowFunnel, teamUtilization, workflowVelocity } = data;
 
   return (
     <div className="space-y-6">
@@ -102,7 +102,15 @@ export function ProjectDashboard({
         </Panel>
 
         <Panel title="Recent Messages & Comments" hint="Mentions, replies, and comments across this project">
-          <EmptyHint text="No messages or comments in the last 30 days." sub="Mentions, replies, and messages will appear here" />
+          {recentComments.length === 0 ? (
+            <EmptyHint text="No messages or comments in the last 30 days." sub="Mentions, replies, and messages will appear here" />
+          ) : (
+            <ul className="max-h-[420px] divide-y divide-slate-100 overflow-y-auto">
+              {recentComments.map((cm) => (
+                <CommentRow key={cm.id} comment={cm} onOpenItem={onOpenItem} />
+              ))}
+            </ul>
+          )}
         </Panel>
 
         <Panel title="Workflow funnel" hint="Share of items currently in each status">
@@ -157,6 +165,29 @@ function ActivityRow({ activity, onOpenItem }: { activity: ProjectDashboardActiv
         </button>{' '}
         to <span className="font-semibold text-slate-900">{activity.to_status_name ?? '—'}</span>.
       </p>
+    </li>
+  );
+}
+
+function CommentRow({ comment, onOpenItem }: { comment: ProjectDashboardComment; onOpenItem: (id: string) => void }) {
+  const snippet = comment.body.length > 100 ? `${comment.body.slice(0, 100)}…` : comment.body;
+  return (
+    <li className="py-3 text-[13px] leading-relaxed first:pt-0">
+      <p className="mb-1 flex items-center gap-2 text-slate-400">
+        {formatActivity(comment.created_at)}
+        {comment.resolved && (
+          <span className="rounded-full border border-slate-200 px-1.5 py-0.5 text-[11px] text-slate-500">Resolved</span>
+        )}
+      </p>
+      <p className="text-slate-700">
+        <span className="font-semibold text-slate-900">{comment.author_name ?? 'Someone'}</span> commented on{' '}
+        <button type="button" onClick={() => onOpenItem(comment.item_id)}
+                className="font-medium text-blue-600 hover:underline">
+          {comment.item_name}
+        </button>
+        :
+      </p>
+      <p className="mt-0.5 truncate text-slate-500">{snippet}</p>
     </li>
   );
 }
