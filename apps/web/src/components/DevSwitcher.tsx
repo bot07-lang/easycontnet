@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { DEV_USERS } from '../lib/supabase';
 import { signInAs, signOut } from '../lib/session';
+import { initials } from '../lib/avatar';
 
 /**
  * Dev-only user switcher. Stands in for a login screen: pick a seeded user and
@@ -91,8 +92,4 @@ export function DevSwitcher({ session }: { session: Session | null }) {
       )}
     </div>
   );
-}
-
-function initials(name: string) {
-  return name.split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { toast } from '../lib/toast';
+import { initials, avatarColor } from '../lib/avatar';
 
 /**
  * The dashed "add member" circle on a project card: a compact popover over
@@ -99,12 +100,3 @@ export function MemberPickerButton({ projectId }: { projectId: string }) {
   );
 }
 
-function initials(name: string): string {
-  return name.split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
-}
-function avatarColor(name: string): string {
-  const palette = ['#e11d48', '#7c3aed', '#0891b2', '#ea580c', '#059669', '#4f46e5', '#db2777'];
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return palette[h % palette.length]!;
-}

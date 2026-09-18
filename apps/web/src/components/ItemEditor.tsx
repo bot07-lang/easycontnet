@@ -7,6 +7,7 @@ import { DIFF_CSS } from './diff-css';
 // lazy, so it's not part of every item-editor page load.
 const CompareDialog = lazy(() => import('./CompareDialog').then((m) => ({ default: m.CompareDialog })));
 import { fieldValueToHtml, isDiffableField } from '../lib/diff-fields';
+import { sanitizeHtml } from '../lib/sanitize';
 import { buildItemHtml, downloadText, exportDateLabel } from '../lib/export-html';
 import * as saveManager from '../lib/save-manager';
 import type { ContentField } from '../mock/article';
@@ -664,7 +665,7 @@ function ReadOnlyField({ label, html }: { label: string; html: string }) {
       <header className="border-b border-slate-200 bg-slate-50/70 px-5 py-3">
         <h3 className="text-[15px] font-semibold text-slate-900">{label}</h3>
       </header>
-      <div className="cw-diff px-5 py-4" dangerouslySetInnerHTML={{ __html: html || '<span class="cw-empty">Empty</span>' }} />
+      <div className="cw-diff px-5 py-4" dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) || '<span class="cw-empty">Empty</span>' }} />
     </section>
   );
 }

@@ -337,7 +337,7 @@ export function ControlsTab({
             <path d="M8 6h6a2 2 0 0 1 2 2v2M8 18h6a2 2 0 0 0 2-2v-2" />
           </svg>
           <span className="flex-1">WORKFLOW</span>
-          <a href="https://help.easycontent.io" target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[12px] font-medium text-blue-600 hover:underline">
+          <a href="https://easycontent.io/help-article/workflow" target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[12px] font-medium text-blue-600 hover:underline">
             Learn more
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></svg>
           </a>

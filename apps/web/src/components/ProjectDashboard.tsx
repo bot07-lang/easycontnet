@@ -11,6 +11,7 @@ import {
 import { MemberAvatars, formatActivity } from './AllProjects';
 import { ProjectSettingsPage } from './ProjectSettingsPage';
 import { HoverTip } from './HoverTip';
+import { initials, avatarColor } from '../lib/avatar';
 
 /**
  * The per-project "Dashboard" tab: header + members, "My items" scoped to
@@ -230,8 +231,8 @@ function UtilizationList({ rows }: { rows: ProjectDashboardUtilization[] }) {
       {rows.map((r) => (
         <li key={r.profile_id} className="flex items-center gap-3">
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[11px] font-semibold text-white"
-                style={{ background: avatarColorFor(r.name) }}>
-            {initialsFor(r.name)}
+                style={{ background: avatarColor(r.name) }}>
+            {initials(r.name)}
           </span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-medium text-slate-800">{r.name}</p>
@@ -295,19 +296,6 @@ function formatDuration(seconds: number | null): string {
   if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'}`;
   const days = Math.round(hrs / 24);
   return `${days} day${days === 1 ? '' : 's'}`;
-}
-
-// Mirrors AllProjects's avatarColor()/initials() — kept local since those
-// aren't exported (the card avatars there work off a slightly different
-// {name} shape than this panel's utilization rows).
-function initialsFor(name: string): string {
-  return name.split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
-}
-function avatarColorFor(name: string): string {
-  const palette = ['#e11d48', '#7c3aed', '#0891b2', '#ea580c', '#059669', '#4f46e5', '#db2777'];
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return palette[h % palette.length]!;
 }
 
 function IconTeam() {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type OrgUser } from '../lib/api';
 import { toast } from '../lib/toast';
+import { initials, avatarColor } from '../lib/avatar';
 
 /**
  * Create-a-new-project dialog: a required name and an optional multi-select of
@@ -163,12 +164,3 @@ function UserRow({ user, checked, onToggle }: { user: OrgUser; checked: boolean;
   );
 }
 
-function initials(name: string) {
-  return name.split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
-}
-function avatarColor(name: string) {
-  const palette = ['#e11d48', '#7c3aed', '#0891b2', '#ea580c', '#059669', '#4f46e5', '#db2777'];
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return palette[h % palette.length]!;
-}

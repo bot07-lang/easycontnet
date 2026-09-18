@@ -9,6 +9,7 @@ import {
   type DiffFieldMeta,
 } from '../lib/diff-fields';
 import { toast } from '../lib/toast';
+import { sanitizeHtml } from '../lib/sanitize';
 import { DIFF_CSS } from './diff-css';
 
 /**
@@ -391,12 +392,14 @@ function FieldDiff({
         // Each side renders its OWN raw HTML — old (as it was) | new (as it is) —
         // so formatting/colour changes show by the sides differing, no overlay.
         <div className="grid grid-cols-2 divide-x divide-slate-200">
-          <div className="cw-diff min-w-0 overflow-x-auto px-5 py-4" dangerouslySetInnerHTML={{ __html: aHtml || '<span class="cw-empty">Empty</span>' }} />
-          <div className="cw-diff min-w-0 overflow-x-auto px-5 py-4" dangerouslySetInnerHTML={{ __html: bHtml || '<span class="cw-empty">Empty</span>' }} />
+          <div className="cw-diff min-w-0 overflow-x-auto px-5 py-4" dangerouslySetInnerHTML={{ __html: sanitizeHtml(aHtml) || '<span class="cw-empty">Empty</span>' }} />
+          <div className="cw-diff min-w-0 overflow-x-auto px-5 py-4" dangerouslySetInnerHTML={{ __html: sanitizeHtml(bHtml) || '<span class="cw-empty">Empty</span>' }} />
         </div>
       ) : (
         // Unified: one combined block with htmldiff's inline del (red) + ins (green).
-        <div className="cw-diff px-5 py-4" dangerouslySetInnerHTML={{ __html: (changed ? diffed : bHtml) || '<span class="cw-empty">Empty</span>' }} />
+        // htmldiff runs on the RAW (pre-sanitize) HTML — see below — so the merged
+        // output still needs sanitizing here, same as the two split-view panes above.
+        <div className="cw-diff px-5 py-4" dangerouslySetInnerHTML={{ __html: sanitizeHtml(changed ? diffed : bHtml) || '<span class="cw-empty">Empty</span>' }} />
       )}
     </div>
   );

@@ -5,6 +5,7 @@ import { CreateProjectDialog } from './CreateProjectDialog';
 import { toast } from '../lib/toast';
 import { HoverTip } from './HoverTip';
 import { MemberPickerButton } from './MemberPicker';
+import { initials, avatarColor } from '../lib/avatar';
 
 type SortKey = 'created' | 'active' | 'name' | 'items' | 'overdue';
 const SORTS: { key: SortKey; label: string }[] = [
@@ -554,13 +555,3 @@ export function formatActivity(ts: string | null): string {
   return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
-function initials(name: string): string {
-  return name.split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
-}
-
-function avatarColor(name: string): string {
-  const palette = ['#e11d48', '#7c3aed', '#0891b2', '#ea580c', '#059669', '#4f46e5', '#db2777'];
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return palette[h % palette.length]!;
-}
